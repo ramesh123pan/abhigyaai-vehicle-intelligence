@@ -12,9 +12,9 @@ New gateway requests record operational metadata in `api_usage_logs`: client IP,
 
 Provider responses are cached even when verification fails after a charge. For example, a Way2API HTTP 422 response with `charged: true` is stored as the raw vehicle-cache response for the normal cache TTL, so repeated requests do not immediately create another paid provider call. The external response keeps the provider HTTP status and body.
 
-Registration validation occurs before authentication quota consumption reaches the provider call. Use the four-digit final series format, for example `UP16AN0593`; `UP16AN593` returns HTTP 400 and is never sent to Way2API.
+Registration validation occurs before authentication quota consumption reaches the provider call. Standard plates require a two-letter state code, a two-digit numeric RTO code, a one-to-three-letter series, and a four-digit final number. Delhi also supports its alphanumeric zonal code format, so `DL3SDV7431` is accepted as `DL` + `3S` + `DV` + `7431`; `UP16AN593` and `UP1A5930` return HTTP 400 and are never sent to Way2API.
 
-The gateway also checks the state/UT prefix against the supported Indian code list, requires exactly two RTO digits and one-to-three alphabetic series characters. This is format validation; official issuance still requires a government registry lookup.
+The gateway also checks the state/UT prefix against the supported Indian code list. It requires exactly two RTO digits for other states, and accepts Delhi's two-to-three-character alphanumeric zonal code. The alphabetical series remains one-to-three letters and the registration number remains exactly four digits. This is format validation; official issuance still requires a government registry lookup.
 
 BH-series values matching `YYBH####A/AA` are also accepted. Diplomatic and vintage legacy formats are rejected because they require separate provider handling.
 

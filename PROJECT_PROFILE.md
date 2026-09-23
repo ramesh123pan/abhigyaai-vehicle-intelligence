@@ -67,7 +67,7 @@ Charged provider failures: the external gateway now stores the raw Way2API respo
 
 Cached charged failures preserve their provider HTTP status. A cached Way2API body with `charged: true`, `success: false`, and `status_code: 422` is returned by the gateway as HTTP 422 rather than being mislabeled HTTP 200.
 
-RC validation is enforced before any provider call on both `/api/rc-lookup` and `/api/v1/external/rc/:registration`. The final registration series must contain four digits; invalid values such as `UP16AN593` return HTTP 400 and do not consume quota or call Way2API.
+RC validation is enforced before any provider call on both `/api/rc-lookup` and `/api/v1/external/rc/:registration`. Standard state plates require a two-digit numeric RTO code, while Delhi's alphanumeric zonal form is supported; `DL3SDV7431` is valid (`DL` + `3S` + `DV` + `7431`). The final registration number must contain four digits; invalid values such as `UP16AN593` and `UP1A5930` return HTTP 400 and do not consume quota or call Way2API.
 
 Validation now checks the complete application format: whitelisted Indian state/UT code, exactly two-digit RTO code, one-to-three alphabetic series letters, and exactly four final digits. It validates structure and known state/UT code; it does not prove that a specific RTO/series was officially issued.
 
