@@ -58,7 +58,7 @@ External gateway behavior was corrected for charged verification failures: all W
 
 The common JSON response helper now preserves a cached charged failure's provider status code, including HTTP 422.
 
-All RC entry points now require the four-digit final registration series before live lookup. `UP16AN0593` and Delhi's `DL3SDV7431` are valid; `UP16AN593` and `UP1A5930` are rejected before provider access. Delhi's alphanumeric zonal RTO format is handled separately from the two-digit numeric RTO rule used by other states.
+All RC entry points now require the four-digit final registration series before live lookup. `UP16AN0593` and Delhi's `DL3SDV7431` are valid; `UP16AN593` and `UP1A5930` are rejected before provider access. The parser checks the standard two-digit numeric RTO form first, then handles Delhi's alphanumeric zonal RTO format separately.
 
 The validator now also requires a known Indian state/UT prefix, exactly two RTO digits, and one-to-three series letters. `UP1A5930` is rejected before authentication/quota/provider work.
 
