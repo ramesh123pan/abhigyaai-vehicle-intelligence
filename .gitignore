@@ -1,0 +1,8 @@
+.env
+vehicle-cache.sqlite
+vehicle-cache.sqlite-shm
+vehicle-cache.sqlite-wal
+node_modules/
+server-out.log
+server-err.log
+node_modules/

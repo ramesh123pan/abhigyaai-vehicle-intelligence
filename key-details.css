@@ -1,0 +1,39 @@
+/* Page content only; sidebar, topbar and footer use the shared app styles. */
+.key-content section.quota-exhausted{border-color:#f3c675;background:#fffbeb}
+.key-content .quota-exhausted h2{color:#92400e}
+.key-content select{display:block;width:100%;max-width:620px;padding:12px;margin-top:8px;border:1px solid #cfd8e6;border-radius:7px;background:white;color:#17233d}
+.key-content>a{color:#2563eb;text-decoration:none}
+.key-content h1{font-size:30px;margin:4px 0 12px}
+.key-content h2{font-size:17px;margin-top:0}
+.key-content .eyebrow{letter-spacing:.14em;font-size:11px;color:#64748b;margin-top:24px}
+.key-content section,.key-content #login{background:#fff;border:1px solid #e0e7f2;border-radius:14px;padding:24px;margin:20px 0;box-shadow:0 6px 20px #18274705}
+.key-content .section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:14px}
+.key-content .section-heading h2{margin-bottom:6px}
+.key-content .section-heading p{margin:0}
+.key-content .history-toolbar{display:flex;align-items:center;gap:12px;margin:8px 0 14px}.key-content .history-toolbar label{margin:0;font-size:12px;font-weight:600}.key-content .history-toolbar input{max-width:360px;padding:9px 12px}.key-content #historyCount{margin-left:auto;color:#64748b;font-size:12px}
+.key-content .sort-button{padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:inherit;cursor:pointer}.key-content .sort-button:hover,.key-content .sort-button.sorted{color:#2563eb}.key-content .sort-button span{font-size:13px;margin-left:4px}
+.key-content .inline-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.key-content .inline-actions button{display:inline-flex;align-items:center;gap:6px;padding:9px 12px;border:1px solid #bfd2f4;border-radius:8px;background:#f8fbff;color:#2563eb;font-weight:600;cursor:pointer}
+.key-content .inline-actions button:hover{background:#eaf2ff}
+.key-content .inline-actions button:disabled{opacity:.6;cursor:wait}
+.key-content .inline-actions button span:first-child{font-size:15px;line-height:1}
+.key-content #exportMessage{flex-basis:100%;text-align:right;font-size:12px}
+.key-content .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;background:none;border:0;padding:0;box-shadow:none}
+.key-content .metric{background:white;border:1px solid #dbe5f3;border-radius:14px;padding:22px}
+.key-content .metric:first-child{background:#2563eb;color:white}
+.key-content .metric strong{display:block;font-size:28px;margin-top:8px}
+.key-content .metric span{font-size:12px}
+.key-content .table-wrap{overflow:auto}
+.key-content table{width:100%;border-collapse:collapse;font-size:12px}
+.key-content td:nth-child(7){white-space:normal;min-width:190px}
+.key-content td:nth-child(n+6){white-space:normal;min-width:120px;max-width:260px;word-break:break-word}.key-content td:nth-child(9){min-width:220px}.key-content td:nth-child(13){min-width:190px}
+.key-content td,.key-content th{text-align:left;padding:12px;border-bottom:1px solid #edf1f7;white-space:nowrap}
+.key-content th{background:#f7f9fd;color:#64748b}
+.key-content p{color:#64748b}
+.key-content label{display:block;margin:12px 0;color:#52617b}
+.key-content input{display:block;padding:10px;border:1px solid #cad5e5;border-radius:6px;width:100%;max-width:350px}
+.key-content button{padding:11px 20px}
+.key-content [hidden]{display:none!important}
+@media(max-width:1050px){.key-content .cards{grid-template-columns:repeat(3,1fr)}}@media(max-width:850px){.key-content .cards{grid-template-columns:1fr 1fr}}
+@media(max-width:550px){.key-content .cards{grid-template-columns:1fr}}
+@media(max-width:650px){.key-content .section-heading{display:block}.key-content .inline-actions{justify-content:flex-start;margin-top:14px}.key-content #exportMessage{text-align:left}}
