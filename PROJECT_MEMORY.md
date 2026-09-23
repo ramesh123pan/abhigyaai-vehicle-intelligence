@@ -1,5 +1,21 @@
 # Vehicle Desk — Project Memory
 
+## Production deployment — 2026-09-23
+
+CyberPanel Git is attached to `rcvd.xims.au` from the GitHub `main` branch. The MySQL dump was imported into `xims_rcvd`; the server verified the application tables, 5 `vehicle_cache` records, and 2 `admins` records. PM2 process `abhigyaai` is online and serves port 4173. The production `.env` is kept only on the server. A real `WAY2API_API_KEY` still needs to be entered before live provider calls can run.
+
+The public domain initially returned LiteSpeed 404 for `/api/profile` and `/api/plans` because only static files were configured. The vhost was updated with a LiteSpeed proxy processor and `/api/` context to forward requests to Node port 4173. Public API checks now return Node's JSON `401 Authentication required` response when unauthenticated, confirming routing is fixed.
+
+No `.htaccess` is needed for this configuration; the vhost-level proxy is the working route. A standalone rewrite rule without a defined LiteSpeed external app produced 500 and was removed.
+
+Clean login routing is handled by a server-side `login` alias to `login.html` because the current LiteSpeed static setup did not apply `.htaccess` rewrites. The public login URL now returns HTTP 200 with its `returnTo` query preserved.
+
+Imported admin hashes were created with an empty pepper; production login failed while a new pepper was configured. The production pepper was aligned with the imported database and PM2 restarted. Admin password should be changed after successful login.
+
+Clean client routes were missing static aliases on production. Aliases to `index.html` were added for dashboard, vehicle services, admin pages, plans, usage, audit, and settings; direct `/dashboard` and `/pucc` checks return 200.
+
+The route aliases were then removed in favor of the scalable LiteSpeed vhost root proxy to Node port 4173. Node now receives all clean page URLs and API calls, so new routes do not require new server files. Protected pages correctly return 302 to login, while `/login` is served by Node with HTTP 200.
+
 ## Status correction — 2026-09-22
 
 Shared layout update: shared-layout.js composes details with index.html's sidebar/topbar/footer and global styles. shared-account.js is used by both pages for account controls. key-details.css is content-scoped. Authenticated Chrome verification now confirms Test2 data and shared chrome at `/plan/2`; account dropdown opens correctly. Request history exports are real PDF/XLSX files and are exposed as inline icon actions in the section header.
@@ -230,3 +246,4 @@ Provider-specific response JSON is still retained in MySQL for audit/raw-respons
 - After server changes, restart the Node process on port 4173.
 - Verify the browser UI after layout changes.
 - Preserve the cache-first behavior unless a user explicitly requests a live refresh.
+- API documentation endpoint examples are origin-aware: production displays `https://rcvd.xims.au/api/v1/external/rc/...`, while local development displays the localhost endpoint.

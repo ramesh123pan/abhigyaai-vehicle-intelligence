@@ -23,10 +23,11 @@ Known logging gaps: internal admin lookups are not recorded in `api_usage_logs`,
 ## Endpoint
 
 ```http
-GET http://127.0.0.1:4173/api/v1/external/rc/{registration_number}
+GET https://rcvd.xims.au/api/v1/external/rc/{registration_number}
 ```
 
-Use the production host instead of `127.0.0.1` when deployed.
+Production endpoint: `https://rcvd.xims.au/api/v1/external/rc/{registration_number}`.
+For local development, use `http://127.0.0.1:4173/api/v1/external/rc/{registration_number}`.
 
 ## Authentication
 
@@ -57,7 +58,7 @@ The raw key is returned once. Store it securely; it cannot be recovered later. K
 
 ```bash
 curl -H "X-API-Key: vdesk_your_key" \
-  http://127.0.0.1:4173/api/v1/external/rc/UP16FA0981
+  https://rcvd.xims.au/api/v1/external/rc/UP16FA0981
 ```
 
 The endpoint serves a valid cached MySQL response for up to 30 days. On a cache miss it uses the configured Way2API provider, stores the response, and returns it. External requests are written to the audit log with the API client name and vehicle number.

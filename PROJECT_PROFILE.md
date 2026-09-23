@@ -1,6 +1,20 @@
 # Vehicle Desk project profile
 
-Updated: 2026-09-22
+Updated: 2026-09-23
+
+Deployment update (2026-09-23): GitHub code is attached to CyberPanel for `rcvd.xims.au`. Production MySQL database `xims_rcvd` was imported from the local `lorryinfo.sql` dump; verification found the required tables, 5 vehicle-cache records, and 2 admin records. The production app is managed by PM2 as `abhigyaai` and is online on port 4173. Production `.env` is server-only and is not committed to GitHub. The Way2API provider key must be replaced with the real production key before paid live lookups are enabled.
+
+Public API routing fix (2026-09-23): LiteSpeed was serving the static document root directly, so public `/api/*` requests returned LiteSpeed 404 pages while localhost Node routes worked. The vhost now defines a LiteSpeed proxy external processor for `127.0.0.1:4173` and a `/api/` proxy context. Public `/api/profile` and `/api/plans` now reach Node and return the expected JSON authentication response instead of 404.
+
+Deployment verification: no project-root `.htaccess` is required for the current CyberPanel/OpenLiteSpeed setup. The API proxy is defined at the vhost level; adding an `[P]` rewrite without an external proxy application caused a LiteSpeed 500. Public `/api/profile` currently returns JSON 401 when unauthenticated, confirming the vhost proxy is active.
+
+Login routing fix (2026-09-23): LiteSpeed did not map the clean `/login` URL to `login.html`, so unauthenticated API redirects landed on a 404. A server-side `login` alias to `login.html` was added; `https://rcvd.xims.au/login?returnTo=%2Fdashboard` now returns HTTP 200 and preserves the return query.
+
+Production login fix (2026-09-23): Database verification found both imported admin accounts active. Their hashes were generated locally without `PASSWORD_PEPPER`, while production had a different generated pepper, causing valid credentials to fail. Production `PASSWORD_PEPPER` was aligned with the imported hashes and PM2 was restarted successfully. Change the admin password after first login.
+
+Clean route deployment fix (2026-09-23): The live vhost proxies clean application routes to the Node process, so `/dashboard`, `/search`, `/records`, `/pucc`, `/insurance`, `/fitness`, `/activity`, `/api-docs`, `/admins`, `/api-keys`, `/plans`, `/usage`, `/audit`, and `/settings` do not require empty route folders or symlinks. API documentation now renders the current origin dynamically and shows the production HTTPS endpoint on `rcvd.xims.au`.
+
+Scalable route deployment fix (2026-09-23): Removed the temporary route symlinks and configured the LiteSpeed vhost root context to proxy all application requests to the Node `nodeapp` processor on port 4173. This makes future clean URLs work without adding server-side folders or aliases. Verification: protected `/dashboard`, `/pucc`, and `/plan/2` return the expected 302 login redirect; `/login` returns 200; `/api/profile` returns JSON 401 when unauthenticated.
 
 ## Purpose and preferences
 
