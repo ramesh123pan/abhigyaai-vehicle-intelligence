@@ -247,3 +247,4 @@ Provider-specific response JSON is still retained in MySQL for audit/raw-respons
 - Verify the browser UI after layout changes.
 - Preserve the cache-first behavior unless a user explicitly requests a live refresh.
 - API documentation endpoint examples are origin-aware: production displays `https://rcvd.xims.au/api/v1/external/rc/...`, while local development displays the localhost endpoint.
+- Admin edit saves a supplied password by hashing it with the configured pepper; leaving the edit password blank preserves the current password. Password values are never written to audit logs.
