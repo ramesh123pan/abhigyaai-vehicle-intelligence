@@ -248,3 +248,9 @@ Provider-specific response JSON is still retained in MySQL for audit/raw-respons
 - Preserve the cache-first behavior unless a user explicitly requests a live refresh.
 - API documentation endpoint examples are origin-aware: production displays `https://rcvd.xims.au/api/v1/external/rc/...`, while local development displays the localhost endpoint.
 - Admin edit saves a supplied password by hashing it with the configured pepper; leaving the edit password blank preserves the current password. Password values are never written to audit logs.
+- Saved Vehicles supports individual and bulk deletion with confirmation. Deletion uses the authenticated `DELETE /api/records/:vehicle` route, removes all provider-cache rows for that registration, and writes `vehicle_deleted` to the audit log.
+## Latest local usage-log correction — 2026-09-24
+
+External gateway usage rows now receive the vehicle registration, source (`mysql` or `way2api`), HTTP status, and cache-hit flag after the lookup completes. Existing rows created before this correction may still have NULL vehicle/source/status fields and cannot be reliably reconstructed.
+
+Verification: `node --check server.js` and `node --check app.js` passed; the verified local Node process was restarted for port 4173. Browser end-to-end Postman-to-dashboard verification remains pending.

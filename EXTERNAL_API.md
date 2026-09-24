@@ -72,3 +72,4 @@ The endpoint serves a valid cached MySQL response for up to 30 days. On a cache 
 - `500` — provider configuration or server error
 
 Never expose an external API key in frontend JavaScript or public repositories. Put the API behind HTTPS in production, keep it server-to-server, and use a separate key per consuming application so access can be revoked independently. The API is cache-first: a valid cached record is returned without a paid provider call until the cache TTL expires.
+Newly completed gateway requests finalize their `api_usage_logs` row with the registration number, source, HTTP status, and cache-hit flag. Older incomplete rows may remain NULL because the missing metadata cannot be inferred after the fact.

@@ -4,6 +4,8 @@ Updated: 2026-09-23
 
 Admin update fix (2026-09-23): The admin edit endpoint now hashes and persists a newly entered password, while a blank password leaves the existing hash unchanged. The audit entry records whether the password changed without storing the password.
 
+Vehicle deletion update (2026-09-24): The Saved Vehicles page now supports selecting rows, select-all on the current page, individual deletion, and confirmed bulk deletion. `DELETE /api/records/:vehicle` removes all cached provider rows for that registration and records an audit event. Local syntax and API checks passed; browser interaction remains to be verified after restart.
+
 Deployment update (2026-09-23): GitHub code is attached to CyberPanel for `rcvd.xims.au`. Production MySQL database `xims_rcvd` was imported from the local `lorryinfo.sql` dump; verification found the required tables, 5 vehicle-cache records, and 2 admin records. The production app is managed by PM2 as `abhigyaai` and is online on port 4173. Production `.env` is server-only and is not committed to GitHub. The Way2API provider key must be replaced with the real production key before paid live lookups are enabled.
 
 Public API routing fix (2026-09-23): LiteSpeed was serving the static document root directly, so public `/api/*` requests returned LiteSpeed 404 pages while localhost Node routes worked. The vhost now defines a LiteSpeed proxy external processor for `127.0.0.1:4173` and a `/api/` proxy context. Public `/api/profile` and `/api/plans` now reach Node and return the expected JSON authentication response instead of 404.
@@ -158,3 +160,6 @@ Monthly billing records and full monthly history have not been implemented. Usag
 - EXTERNAL_API.md: external vehicle lookup contract.
 
 Related chat retrieval is partial; do not claim all historical turns have been reviewed.
+## Latest verification note — 2026-09-24
+
+Newly completed external RC requests finalize their `api_usage_logs` row with registration, provider source, HTTP status, and cache-hit data. Older incomplete rows remain NULL because they cannot be safely reconstructed. Syntax checks passed and the local port-4173 process was restarted; this is not a browser verification of the complete Postman-to-Usage flow.
