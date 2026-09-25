@@ -212,3 +212,5 @@ Added `GET /api/v1/external/usage` with legacy `/api/external/usage` support. It
 External RC lookup responses now append the same live `usage` object after each successful cache or provider response, allowing consuming applications to print the updated quota immediately after a hit. The usage summary is read-only and uses the already-recorded request plus the top-up ledger.
 
 API Documentation now includes the read-only usage-summary endpoint, the `total_calls` and `total_top_up_calls` meanings, and an inline response example. Added `test/TEST_STATUS.md` as the current QA status page with automated counts, skipped prerequisites, external API coverage, route checks, load-test status, and known limitations.
+
+API Documentation UI was redesigned around a developer-portal pattern: quick start, sticky in-page navigation, authentication, method/path blocks, copyable cURL, parameter table, usage endpoint, complete JSON response example, quota field table, and error/security guidance. The content follows the project's actual GET endpoints and was informed by the Way2API reference and common API reference patterns; no provider credentials or secrets are shown.
