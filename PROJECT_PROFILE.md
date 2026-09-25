@@ -208,3 +208,5 @@ Completed local syntax checks for server, client, session, shared-account, key-d
 ## External usage summary — 2026-09-25
 
 Added `GET /api/v1/external/usage` with legacy `/api/external/usage` support. It authenticates the calling site API key without consuming quota or creating a request-history row, then returns period, plan, monthly allowance as `total_calls`, lifetime credited top-up total as `total_top_up_calls`, current-month used calls, monthly remaining calls, current top-up balance, and combined remaining calls. No API-key identity or secret is returned. Syntax and unauthenticated contract verification are required; authenticated key verification remains pending until a test external key is supplied safely.
+
+External RC lookup responses now append the same live `usage` object after each successful cache or provider response, allowing consuming applications to print the updated quota immediately after a hit. The usage summary is read-only and uses the already-recorded request plus the top-up ledger.

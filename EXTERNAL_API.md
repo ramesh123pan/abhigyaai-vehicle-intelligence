@@ -86,6 +86,8 @@ curl -H "X-API-Key: vdesk_your_key" \
 
 The endpoint serves a valid cached MySQL response for up to 30 days. On a cache miss it uses the configured Way2API provider, stores the response, and returns it. External requests are written to the audit log with the API client name and vehicle number.
 
+Every successful external RC response also includes the same `usage` object as `/api/v1/external/usage`. It is calculated after the current request is recorded, so the caller immediately sees updated `used_calls`, `monthly_remaining_calls`, `topup_calls`, `total_remaining_calls`, and `topup_used` values.
+
 ## Common errors
 
 - `401` — missing or invalid API key
