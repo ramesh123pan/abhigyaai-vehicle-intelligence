@@ -31,18 +31,18 @@ For local development, use `http://127.0.0.1:4173/api/v1/external/rc/{registrati
 
 ### API usage summary
 
-`GET /api/v1/external/usage` (also available at `/api/external/usage`) returns the calling key's usage without consuming quota or creating a request-history row. Send the same `X-API-Key` or `Authorization: Bearer` header used for RC lookup. The response identifies the key by ID and name only; the raw secret is never returned. It includes the current plan allowance, used calls, monthly remaining calls, top-up calls, and combined remaining calls.
+`GET /api/v1/external/usage` (also available at `/api/external/usage`) returns the calling key's usage without consuming quota or creating a request-history row. Send the same `X-API-Key` or `Authorization: Bearer` header used for RC lookup. `usage.total_calls` is the monthly plan allowance, while `usage.total_top_up_calls` is the lifetime sum of credited top-up calls from the billing ledger. It also includes current-month used calls, monthly remaining calls, current top-up balance, and combined remaining calls. The secret key and key identity are not returned.
 
 Local example: `http://127.0.0.1:4173/api/v1/external/usage`
 
 ```json
 {
   "success": true,
-  "api_key": { "id": 2, "name": "Test2", "status": "Active", "expires_at": null },
   "period": "2026-09",
   "plan": { "id": 1, "name": "Default", "monthly_allowance": 1000 },
   "usage": {
-    "total_calls": 1100,
+    "total_calls": 1000,
+    "total_top_up_calls": 100,
     "used_calls": 13,
     "monthly_remaining_calls": 987,
     "topup_calls": 100,
