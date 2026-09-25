@@ -180,3 +180,6 @@ Newly completed external RC requests finalize their `api_usage_logs` row with re
 ## Saved Vehicles selection-column correction — 2026-09-25
 
 The Saved Vehicles table now gives the master select-all checkbox a fixed, centered first column and fixed table layout so it cannot overlap the Registration heading. The individual row checkboxes use the same dedicated column. Browser visual verification remains pending.
+## Top-up package update correction — 2026-09-25
+
+Fixed the Plan Management top-up package edit submission so it reliably sends the package ID and all editable fields (`name`, `credits`, `price`, and `active`) to `PATCH /api/topup-packages/:id`, reports API errors, and reloads the package list after success. The previous automated test only created a package; it did not call PATCH or verify edited values. The test now verifies all four edited fields, but authenticated CRUD cases were skipped in the latest run because `TEST_ADMIN_EMAIL` and `TEST_ADMIN_PASSWORD` are not configured. JavaScript syntax checks passed; the existing local port-4173 process remained serving, so no restart was performed.

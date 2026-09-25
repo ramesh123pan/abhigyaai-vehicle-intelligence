@@ -114,6 +114,14 @@ test('top-up package CRUD and validation', { skip: !email || !password ? 'Set te
   const row = packages.body.packages.find((item) => item.name === name);
   assert.ok(row);
   createdPackageId = row.id;
+  const updated = await request(`/api/topup-packages/${createdPackageId}`, { method: 'PATCH', body: JSON.stringify({ name: `${name} Updated`, credits: 25, price: 12.5, active: false }) });
+  assert.equal(updated.response.status, 200);
+  const afterUpdate = await request('/api/topup-packages');
+  const updatedRow = afterUpdate.body.packages.find((item) => Number(item.id) === Number(createdPackageId));
+  assert.equal(updatedRow.name, `${name} Updated`);
+  assert.equal(Number(updatedRow.credits), 25);
+  assert.equal(Number(updatedRow.price), 12.5);
+  assert.equal(Number(updatedRow.active), 0);
 });
 
 test('profile, settings, audit, API-key, usage, and service action APIs', { skip: !email || !password ? 'Set test admin credentials' : false }, async () => {

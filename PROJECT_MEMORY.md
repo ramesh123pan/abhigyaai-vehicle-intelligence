@@ -269,3 +269,4 @@ Executable API coverage was expanded for profile/settings validation, audit-even
 External gateway usage rows now receive the vehicle registration, source (`mysql` or `way2api`), HTTP status, and cache-hit flag after the lookup completes. Existing rows created before this correction may still have NULL vehicle/source/status fields and cannot be reliably reconstructed.
 
 Verification: `node --check server.js` and `node --check app.js` passed; the verified local Node process was restarted for port 4173. Browser end-to-end Postman-to-dashboard verification remains pending.
+- Top-up package edit now uses a guarded capture-phase form handler, sends the package ID plus all editable fields, reports failures, and reloads the Plan Management list after a successful update. The CRUD test now verifies the full PATCH payload, not just package creation.
