@@ -251,6 +251,7 @@ Provider-specific response JSON is still retained in MySQL for audit/raw-respons
 - API documentation endpoint examples are origin-aware: production displays `https://rcvd.xims.au/api/v1/external/rc/...`, while local development displays the localhost endpoint.
 - Admin edit saves a supplied password by hashing it with the configured pepper; leaving the edit password blank preserves the current password. Password values are never written to audit logs.
 - Saved Vehicles supports individual and bulk deletion with confirmation. Deletion uses the authenticated `DELETE /api/records/:vehicle` route, removes all provider-cache rows for that registration, and writes `vehicle_deleted` to the audit log.
+- Saved Vehicles keeps the select-all checkbox in a fixed centered first table column, separate from the Registration column, preventing header overlap.
 Plan/top-up executable coverage now verifies selected-key plan assignment and top-up balance/ledger persistence after reload. Invalid plan IDs are rejected. Key-detail responses now include the assigned `plan_id`.
 
 ## Latest local usage-log correction — 2026-09-24

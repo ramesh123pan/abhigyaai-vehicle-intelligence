@@ -177,3 +177,6 @@ Plan/top-up executable coverage now assigns an active plan to a temporary key, a
 ## Latest verification note — 2026-09-24
 
 Newly completed external RC requests finalize their `api_usage_logs` row with registration, provider source, HTTP status, and cache-hit data. Older incomplete rows remain NULL because they cannot be safely reconstructed. Syntax checks passed and the local port-4173 process was restarted; this is not a browser verification of the complete Postman-to-Usage flow.
+## Saved Vehicles selection-column correction — 2026-09-25
+
+The Saved Vehicles table now gives the master select-all checkbox a fixed, centered first column and fixed table layout so it cannot overlap the Registration heading. The individual row checkboxes use the same dedicated column. Browser visual verification remains pending.
