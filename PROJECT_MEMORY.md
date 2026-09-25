@@ -46,6 +46,8 @@ Documentation update verification: source and project notes inspected; no runtim
 
 ## Purpose
 
+Saved Vehicles now places the master Select all control in the table header. Individual and bulk deletion uses a confirmation prompt that explains the action is recorded; the server audit entry remains `vehicle_deleted` with authenticated admin and timestamp.
+
 Plan page presentation now uses pricing cards; plan creation and editing open in a modal, while Dashboard plan summaries use compact cards.
 
 The metadata insert is isolated from the external lookup response path. If a new metadata column or value fails, the server logs the database error and still serves the vehicle result; the failed metadata row must then be repaired from the logged error.
@@ -249,7 +251,19 @@ Provider-specific response JSON is still retained in MySQL for audit/raw-respons
 - API documentation endpoint examples are origin-aware: production displays `https://rcvd.xims.au/api/v1/external/rc/...`, while local development displays the localhost endpoint.
 - Admin edit saves a supplied password by hashing it with the configured pepper; leaving the edit password blank preserves the current password. Password values are never written to audit logs.
 - Saved Vehicles supports individual and bulk deletion with confirmation. Deletion uses the authenticated `DELETE /api/records/:vehicle` route, removes all provider-cache rows for that registration, and writes `vehicle_deleted` to the audit log.
+Plan/top-up executable coverage now verifies selected-key plan assignment and top-up balance/ledger persistence after reload. Invalid plan IDs are rejected. Key-detail responses now include the assigned `plan_id`.
+
 ## Latest local usage-log correction — 2026-09-24
+
+Added `test/TEST_CASES.md`, `test/README.md`, and executable `test/api.test.js` on 2026-09-25. The latest `npm test` run passed 3 tests, skipped 4 authenticated cases because test credentials were not configured, and had 0 failures. Port 4173 was verified listening; no browser verification was performed.
+
+The test suite now reports a rejected test-admin login as the root cause and skips dependent CRUD cases instead of producing cascading 401 failures.
+
+Authenticated test verification completed on 2026-09-25: `npm test` returned 7 passed, 0 skipped, and 0 failed while port 4173 was listening.
+
+Admin CRUD test coverage was expanded to verify invalid-email rejection, name/email/phone/role edits, password update, login with the updated password, and deactivation. The expanded test requires a fresh `npm test` run.
+
+Executable API coverage was expanded for profile/settings validation, audit-event creation, API-key lifecycle, usage/dashboard/records/today endpoints, plan/top-up actions, and external registration validation. Browser-only interactions still require browser automation or manual QA.
 
 External gateway usage rows now receive the vehicle registration, source (`mysql` or `way2api`), HTTP status, and cache-hit flag after the lookup completes. Existing rows created before this correction may still have NULL vehicle/source/status fields and cannot be reliably reconstructed.
 

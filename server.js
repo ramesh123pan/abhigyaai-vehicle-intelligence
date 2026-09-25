@@ -121,7 +121,7 @@ const server = http.createServer((req, res) => {
     if (!protectedApi(req,res)) return;
     (async()=>{try {
       const id=detailApi[1];
-      const [[key]]=await pool.query('SELECT k.id,k.name,k.active,k.expires_at,k.application_url,k.application_address,k.topup_credits,p.name AS plan_name,p.monthly_call_limit,p.price FROM external_api_keys k LEFT JOIN api_plans p ON p.id=k.plan_id WHERE k.id=?',[id]);
+      const [[key]]=await pool.query('SELECT k.id,k.name,k.active,k.expires_at,k.application_url,k.application_address,k.plan_id,k.topup_credits,p.name AS plan_name,p.monthly_call_limit,p.price FROM external_api_keys k LEFT JOIN api_plans p ON p.id=k.plan_id WHERE k.id=?',[id]);
       if(!key)return send(res,404,JSON.stringify({message:'API key not found'}));
       const [[usage]]=await pool.query("SELECT COUNT(*) AS used FROM api_usage_logs WHERE api_key_id=? AND created_at>=DATE_FORMAT(CURRENT_DATE,'%Y-%m-01')",[id]);
       const [months]=await pool.query("SELECT DATE_FORMAT(created_at,'%Y-%m') AS month,COUNT(*) AS calls,SUM(cache_hit) AS cache_hits FROM api_usage_logs WHERE api_key_id=? GROUP BY month ORDER BY month DESC",[id]);

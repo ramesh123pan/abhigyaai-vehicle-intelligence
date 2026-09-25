@@ -63,6 +63,18 @@ Login flow update: direct `/login` and `/login.html` navigation now redirects an
 
 ## Current status
 
+Saved Vehicles deletion update: the master Select all control is moved into the table header, and individual/bulk deletion requires confirmation explaining that the action is recorded. The existing server deletion route writes `vehicle_deleted` with the authenticated admin and timestamp to the Audit Log. Browser verification of the updated placement remains pending.
+
+### QA test-case baseline — 2026-09-25
+
+Added [test/TEST_CASES.md](test/TEST_CASES.md), [test/README.md](test/README.md), and executable [test/api.test.js](test/api.test.js). The manual baseline covers all modules; the executable suite covers server/auth contracts, protected APIs, admin CRUD, plan CRUD, top-up package CRUD, and external registration validation. Latest `npm test` run: 3 passed, 4 skipped, 0 failed; port 4173 was verified listening, but test credentials were not configured. No browser verification was performed.
+
+The executable suite now treats a rejected test-admin login as the root cause and skips dependent CRUD tests, rather than reporting cascading 401 responses as CRUD assertion failures. Authenticated verification now passes: latest `npm test` run completed with 7 passed, 0 skipped, and 0 failed.
+
+Admin CRUD coverage was expanded to verify invalid-email rejection, name/email/phone/role edits, password update, login with the updated password, and deactivation. This expanded test has not yet been executed in this turn.
+
+Executable API coverage was also expanded for profile/settings validation, audit-event creation, API-key lifecycle, usage/dashboard/records/today endpoints, plan/top-up actions, and external registration validation. Browser-only interactions such as clicks, modals, filters, charts, and file download rendering still require browser automation or manual QA.
+
 Plan Management uses responsive pricing cards, and create/edit forms open in a modal popup. The Dashboard API Plans section uses compact summary cards with pricing, limits, Popular styling, and a View all plans link.
 
 External lookup resilience: metadata logging errors are now logged to `server-err.log` but do not block a valid cache/provider response. The external API remains responsible for authentication, plan, and quota errors.
@@ -160,6 +172,8 @@ Monthly billing records and full monthly history have not been implemented. Usag
 - EXTERNAL_API.md: external vehicle lookup contract.
 
 Related chat retrieval is partial; do not claim all historical turns have been reviewed.
+Plan/top-up executable coverage now assigns an active plan to a temporary key, adds an active package, reloads key details, and verifies the selected key’s plan ID/name, top-up balance, and bill ledger persist. Invalid plan IDs are rejected. The key-detail API now includes the assigned `plan_id` for this verification and client use.
+
 ## Latest verification note — 2026-09-24
 
 Newly completed external RC requests finalize their `api_usage_logs` row with registration, provider source, HTTP status, and cache-hit data. Older incomplete rows remain NULL because they cannot be safely reconstructed. Syntax checks passed and the local port-4173 process was restarted; this is not a browser verification of the complete Postman-to-Usage flow.
