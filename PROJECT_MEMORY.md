@@ -272,3 +272,4 @@ Verification: `node --check server.js` and `node --check app.js` passed; the ver
 - Top-up package edit now uses a guarded capture-phase form handler, sends the package ID plus all editable fields, reports failures, and reloads the Plan Management list after a successful update. The CRUD test now verifies the full PATCH payload, not just package creation.
 - Plan Management now shows deactivation controls for plans and top-up packages. Existing top-up packages are checked by ID before update so unchanged edits no longer appear as missing records.
 - After the top-up/plan action correction, the local Node server was restarted and verified listening on port 4173 with HTTP 200 from the homepage.
+- The top-up edit modal explicitly sets the hidden package ID before submission so edits call `PATCH /api/topup-packages/:id` rather than accidentally creating a new package or targeting an empty ID.

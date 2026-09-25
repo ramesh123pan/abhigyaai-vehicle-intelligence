@@ -189,3 +189,6 @@ Plan Management now exposes a deactivation action for catalog plans and top-up p
 ## Follow-up verification — 2026-09-25
 
 The local server was restarted after correcting a misplaced temporary Plan route; port 4173 is listening under Node and the homepage returns HTTP 200. The invalid route was removed. Plan and top-up deactivation controls remain client actions using the existing authenticated PATCH/DELETE APIs. Browser interaction is still pending.
+## Top-up edit modal identity fix — 2026-09-25
+
+The edit modal now uses a capture-phase edit handler and explicitly writes the selected package ID into the hidden field before Save. This prevents the existing delegated click handler from leaving the PATCH request without an ID. `app.js` and `server.js` syntax checks, diff checks, and a local `/plans` route check passed. Authenticated browser submission still needs confirmation.
