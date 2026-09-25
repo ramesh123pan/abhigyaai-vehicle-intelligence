@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "load:test": "node test/load-saved-vehicle.js",
+    "load:test:local": "node test/run-local-load.js"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
