@@ -198,3 +198,6 @@ Removed the forced page reload after top-up package create/edit. Successful save
 ## Chrome verification — top-up CRUD — 2026-09-25
 
 Reproduced the defect in Chrome: the Save package control performed the native form GET, producing `/plans?id=...` in the address bar instead of calling the API. Added an explicit non-submit Save control and guarded form submission. Chrome verification then created `Browser QA Package 20260925D` with 75 credits and INR 149, edited it to 80 credits and INR 159, and confirmed the updated row rendered. Successful saves now refresh the table in place without page reload. A browser-created QA package remains for cleanup.
+## Top-up CRUD test coverage — 2026-09-25
+
+Expanded `test/api.test.js` to cover the complete top-up form on create and edit (`name`, `credits`, `price`, `active`), then verify deactivation through DELETE and the refreshed database row. Updated `test/TEST_CASES.md` with the full manual workflow. The latest automated run still skips authenticated cases when test credentials are absent; Chrome create/edit was verified successfully.

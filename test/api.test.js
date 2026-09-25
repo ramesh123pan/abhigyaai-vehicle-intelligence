@@ -108,7 +108,7 @@ test('top-up package CRUD and validation', { skip: !email || !password ? 'Set te
   const invalid = await request('/api/topup-packages', { method: 'POST', body: JSON.stringify({ name: '', credits: 0, price: -1 }) });
   assert.equal(invalid.response.status, 400);
   const name = `QA Package ${Date.now()}`;
-  const created = await request('/api/topup-packages', { method: 'POST', body: JSON.stringify({ name, credits: 10, price: 5 }) });
+  const created = await request('/api/topup-packages', { method: 'POST', body: JSON.stringify({ name, credits: 10, price: 5, active: true }) });
   assert.equal(created.response.status, 201);
   const packages = await request('/api/topup-packages');
   const row = packages.body.packages.find((item) => item.name === name);
@@ -122,6 +122,11 @@ test('top-up package CRUD and validation', { skip: !email || !password ? 'Set te
   assert.equal(Number(updatedRow.credits), 25);
   assert.equal(Number(updatedRow.price), 12.5);
   assert.equal(Number(updatedRow.active), 0);
+  const deactivated = await request(`/api/topup-packages/${createdPackageId}`, { method: 'DELETE' });
+  assert.equal(deactivated.response.status, 200);
+  const afterDeactivate = await request('/api/topup-packages');
+  const deactivatedRow = afterDeactivate.body.packages.find((item) => Number(item.id) === Number(createdPackageId));
+  assert.equal(Number(deactivatedRow.active), 0);
 });
 
 test('profile, settings, audit, API-key, usage, and service action APIs', { skip: !email || !password ? 'Set test admin credentials' : false }, async () => {
