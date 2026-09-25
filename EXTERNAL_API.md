@@ -29,6 +29,29 @@ GET https://rcvd.xims.au/api/v1/external/rc/{registration_number}
 Production endpoint: `https://rcvd.xims.au/api/v1/external/rc/{registration_number}`.
 For local development, use `http://127.0.0.1:4173/api/v1/external/rc/{registration_number}`.
 
+### API usage summary
+
+`GET /api/v1/external/usage` (also available at `/api/external/usage`) returns the calling key's usage without consuming quota or creating a request-history row. Send the same `X-API-Key` or `Authorization: Bearer` header used for RC lookup. The response identifies the key by ID and name only; the raw secret is never returned. It includes the current plan allowance, used calls, monthly remaining calls, top-up calls, and combined remaining calls.
+
+Local example: `http://127.0.0.1:4173/api/v1/external/usage`
+
+```json
+{
+  "success": true,
+  "api_key": { "id": 2, "name": "Test2", "status": "Active", "expires_at": null },
+  "period": "2026-09",
+  "plan": { "id": 1, "name": "Default", "monthly_allowance": 1000 },
+  "usage": {
+    "total_calls": 1100,
+    "used_calls": 13,
+    "monthly_remaining_calls": 987,
+    "topup_calls": 100,
+    "total_remaining_calls": 1087,
+    "topup_used": 0
+  }
+}
+```
+
 ## Authentication
 
 Send an external API key in either format:

@@ -204,3 +204,7 @@ Expanded `test/api.test.js` to cover the complete top-up form on create and edit
 ## Full local test run — 2026-09-25
 
 Completed local syntax checks for server, client, session, shared-account, key-details, and test JavaScript; `git diff --check` passed. `npm test` completed with 3 passed, 5 skipped, and 0 failed. The skipped cases are authenticated CRUD/module tests because `TEST_ADMIN_EMAIL` and `TEST_ADMIN_PASSWORD` are not configured. Local page routes `/`, `/login`, `/dashboard`, `/plans`, `/usage`, and `/records` all returned HTTP 200. This is not a complete authenticated browser regression run.
+
+## External usage summary — 2026-09-25
+
+Added `GET /api/v1/external/usage` with legacy `/api/external/usage` support. It authenticates the calling site API key without consuming quota or creating a request-history row, then returns key ID/name, active status, plan allowance, current-month used calls, monthly remaining calls, top-up balance, and combined remaining calls. The secret key is never returned. Syntax and unauthenticated contract verification are required; authenticated key verification remains pending until a test external key is supplied safely.
