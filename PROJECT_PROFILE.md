@@ -186,3 +186,6 @@ Fixed the Plan Management top-up package edit submission so it reliably sends th
 ## Plan and top-up deactivation actions — 2026-09-25
 
 Plan Management now exposes a deactivation action for catalog plans and top-up packages. Top-up package updates also treat unchanged values as a successful update when the package exists; the previous `affectedRows` check incorrectly returned “Package not found” for unchanged values. JavaScript syntax and diff checks passed. Authenticated browser verification and live deployment remain pending.
+## Follow-up verification — 2026-09-25
+
+The local server was restarted after correcting a misplaced temporary Plan route; port 4173 is listening under Node and the homepage returns HTTP 200. The invalid route was removed. Plan and top-up deactivation controls remain client actions using the existing authenticated PATCH/DELETE APIs. Browser interaction is still pending.

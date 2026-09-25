@@ -242,4 +242,3 @@ const server = http.createServer((req, res) => {
 });
 
 initDatabase().then(() => server.listen(port, () => console.log(`RC Lookup running at http://localhost:${port}`))).catch(error => { console.error('MySQL connection failed:', error.message); process.exit(1); });
-  if(req.method==='DELETE'&&req.url.match(/^\/api\/plans\/\d+$/)){if(!protectedApi(req,res))return;(async()=>{try{const id=Number(req.url.split('/').pop());const[[plan]]=await pool.query('SELECT id FROM api_plans WHERE id=?',[id]);if(!plan)return send(res,404,JSON.stringify({message:'Plan not found'}));await pool.query('UPDATE api_plans SET active=0 WHERE id=?',[id]);send(res,200,JSON.stringify({updated:true}))}catch(e){send(res,400,JSON.stringify({message:e.message}))}})();return;}
