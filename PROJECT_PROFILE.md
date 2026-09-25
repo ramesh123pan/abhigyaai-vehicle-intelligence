@@ -183,3 +183,6 @@ The Saved Vehicles table now gives the master select-all checkbox a fixed, cente
 ## Top-up package update correction — 2026-09-25
 
 Fixed the Plan Management top-up package edit submission so it reliably sends the package ID and all editable fields (`name`, `credits`, `price`, and `active`) to `PATCH /api/topup-packages/:id`, reports API errors, and reloads the package list after success. The previous automated test only created a package; it did not call PATCH or verify edited values. The test now verifies all four edited fields, but authenticated CRUD cases were skipped in the latest run because `TEST_ADMIN_EMAIL` and `TEST_ADMIN_PASSWORD` are not configured. JavaScript syntax checks passed; the existing local port-4173 process remained serving, so no restart was performed.
+## Plan and top-up deactivation actions — 2026-09-25
+
+Plan Management now exposes a deactivation action for catalog plans and top-up packages. Top-up package updates also treat unchanged values as a successful update when the package exists; the previous `affectedRows` check incorrectly returned “Package not found” for unchanged values. JavaScript syntax and diff checks passed. Authenticated browser verification and live deployment remain pending.
