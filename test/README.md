@@ -1,6 +1,6 @@
 # Test folder
 
-The complete module-by-module QA cases are in [TEST_CASES.md](TEST_CASES.md). Executable HTTP/API coverage is in [api.test.js](api.test.js).
+The complete module-by-module QA cases are in [TEST_CASES.md](TEST_CASES.md). The latest execution summary, passed/skipped coverage, and unresolved verification items are in [TEST_STATUS.md](TEST_STATUS.md). Executable HTTP/API coverage is in [api.test.js](api.test.js).
 
 Coverage includes authentication/session, shared shell/account controls, dashboard, search, saved vehicles, PUCC/insurance/fitness services, API activity/documentation/audit, admin users/profile, API keys, plans/top-ups, usage/key details/exports, settings, and external API/cache/quota/security behavior.
 
