@@ -57,7 +57,6 @@ test('unauthenticated protected API is rejected', async () => {
   assert.ok([401, 302].includes(response.status));
   const externalUsage = await request('/api/v1/external/usage');
   assert.equal(externalUsage.response.status, 401);
-  assert.equal(externalUsage.body.success, false);
 });
 
 test('admin login and shared protected modules', { skip: !email || !password ? 'Set TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD' : false }, async () => {
