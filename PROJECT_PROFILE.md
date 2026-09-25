@@ -192,3 +192,6 @@ The local server was restarted after correcting a misplaced temporary Plan route
 ## Top-up edit modal identity fix — 2026-09-25
 
 The edit modal now uses a capture-phase edit handler and explicitly writes the selected package ID into the hidden field before Save. This prevents the existing delegated click handler from leaving the PATCH request without an ID. `app.js` and `server.js` syntax checks, diff checks, and a local `/plans` route check passed. Authenticated browser submission still needs confirmation.
+## Top-up save feedback correction — 2026-09-25
+
+Removed the forced page reload after top-up package create/edit. Successful saves now refresh the package table in place, while API/database errors remain visible in the modal. Package names remain unique by database design, so duplicate names return an explicit “Package name already exists” error.
