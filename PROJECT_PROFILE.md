@@ -63,7 +63,7 @@ Login flow update: direct `/login` and `/login.html` navigation now redirects an
 
 ## Current status
 
-Saved Vehicles deletion update: the master Select all control is moved into the table header, and individual/bulk deletion requires confirmation explaining that the action is recorded. The existing server deletion route writes `vehicle_deleted` with the authenticated admin and timestamp to the Audit Log. Browser verification of the updated placement remains pending.
+Saved Vehicles deletion update: the master Select all control is moved into the table header with checkbox/text alignment and no stray header label, and individual/bulk deletion requires confirmation explaining that the action is recorded. The existing server deletion route writes `vehicle_deleted` with the authenticated admin and timestamp to the Audit Log. Browser verification of the updated placement remains pending.
 
 ### QA test-case baseline — 2026-09-25
 
