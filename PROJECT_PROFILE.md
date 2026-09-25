@@ -195,3 +195,6 @@ The edit modal now uses a capture-phase edit handler and explicitly writes the s
 ## Top-up save feedback correction — 2026-09-25
 
 Removed the forced page reload after top-up package create/edit. Successful saves now refresh the package table in place, while API/database errors remain visible in the modal. Package names remain unique by database design, so duplicate names return an explicit “Package name already exists” error.
+## Chrome verification — top-up CRUD — 2026-09-25
+
+Reproduced the defect in Chrome: the Save package control performed the native form GET, producing `/plans?id=...` in the address bar instead of calling the API. Added an explicit non-submit Save control and guarded form submission. Chrome verification then created `Browser QA Package 20260925D` with 75 credits and INR 149, edited it to 80 credits and INR 159, and confirmed the updated row rendered. Successful saves now refresh the table in place without page reload. A browser-created QA package remains for cleanup.
