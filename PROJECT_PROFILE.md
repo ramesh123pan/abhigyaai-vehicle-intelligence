@@ -229,6 +229,8 @@ Settings UX correction: Settings is now organized into Business Information, Bra
 
 Settings persistence correction: file input controls are excluded from the JSON payload, uploaded files are converted to data URLs before saving into their matching URL setting, and blank SMTP password submissions preserve the existing server-side password. The server also ignores upload-only fields defensively.
 
+Settings duplication correction: the Branding enhancement now reuses the original Branding section instead of adding a second section, so only one consolidated logo upload area is displayed.
+
 API Documentation UI was redesigned around a developer-portal pattern: quick start, sticky in-page navigation, authentication, method/path blocks, copyable cURL, parameter table, usage endpoint, complete JSON response example, quota field table, and error/security guidance. The content follows the project's actual GET endpoints and was informed by the Way2API reference and common API reference patterns; no provider credentials or secrets are shown.
 
 Documentation UI correction: in-page navigation now scrolls explicitly to each section, code blocks fit their content instead of inheriting the application-wide tall response height, and the response example is formatted as readable two-space JSON at render time.
