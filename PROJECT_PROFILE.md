@@ -222,3 +222,5 @@ The API Documentation surface now uses the full available content width instead 
 Routing correction: added `test-status` to the later clean-page allowlist as well as the primary hash router. This prevents the in-app QA page from being classified as an unknown route and redirected to Dashboard.
 
 Blank-page correction: the clean route normalizes `#test-status` to `/test-status`; the QA renderer now accepts both URL forms, defers after the shared router, and uses a persistent `.test-status-view` shell placeholder. Verified in Chrome at `http://127.0.0.1:4173/test-status`: the Test case status heading, four result cards, automated result table, load-testing result table, and verification notes render in the application shell. No server restart was required because the verified port-4173 process served the updated static assets on reload.
+
+Visual correction: the QA stylesheet is now injected even when the shared-shell placeholder already exists. This restores the dashboard-style white cards, colored result tiles, spacing, borders, and readable tables on the integrated route.
