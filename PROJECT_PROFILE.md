@@ -225,6 +225,8 @@ Settings integration correction: added upload-or-URL logo fields, login title/su
 
 Login branding correction: the configured login title now updates both the sign-in heading and browser document title; when no custom title exists, the business name is used. Dynamically added Settings controls now reload their saved values from `/api/settings`.
 
+Settings UX correction: Settings is now organized into Business Information, Branding, Login page, and SMTP mail delivery tabs. The login title is the configured application name/logo, with subtitle, background image upload/URL, background gradient, and button gradient controls.
+
 API Documentation UI was redesigned around a developer-portal pattern: quick start, sticky in-page navigation, authentication, method/path blocks, copyable cURL, parameter table, usage endpoint, complete JSON response example, quota field table, and error/security guidance. The content follows the project's actual GET endpoints and was informed by the Way2API reference and common API reference patterns; no provider credentials or secrets are shown.
 
 Documentation UI correction: in-page navigation now scrolls explicitly to each section, code blocks fit their content instead of inheriting the application-wide tall response height, and the response example is formatted as readable two-space JSON at render time.
