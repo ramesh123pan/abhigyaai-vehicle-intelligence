@@ -217,4 +217,4 @@ API Documentation UI was redesigned around a developer-portal pattern: quick sta
 
 Documentation UI correction: in-page navigation now scrolls explicitly to each section, code blocks fit their content instead of inheriting the application-wide tall response height, and the response example is formatted as readable two-space JSON at render time.
 
-The API Documentation surface now uses the full available content width instead of the legacy 1,240px cap. Added browser-accessible `/test-status.html` with automated counts, evidence rows, feature verification, skipped-test prerequisites, and a link to the detailed Markdown report; API Documentation links to this QA proof page.
+The API Documentation surface now uses the full available content width instead of the legacy 1,240px cap. Test results are now integrated into the shared application shell at `#test-status`, with automated counts, evidence rows, load-test results, feature verification, and skipped-test prerequisites. The standalone `/test-status.html` remains as a fallback, while API Documentation links to the shared in-app QA page.
