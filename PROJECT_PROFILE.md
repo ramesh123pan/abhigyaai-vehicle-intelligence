@@ -223,6 +223,8 @@ Documentation layout correction: the generic Response tab was removed. The compl
 
 Settings integration correction: added upload-or-URL logo fields, login title/subtitle/logo/color controls, and SMTP host/port/user/password/from-email/security fields. Settings are saved through the existing `/api/settings` endpoint; public login branding is read through `/api/public-settings`, while SMTP credentials remain server-side and are not returned to the browser. Mail transport sending/test delivery is not enabled yet.
 
+Login branding correction: the configured login title now updates both the sign-in heading and browser document title; when no custom title exists, the business name is used. Dynamically added Settings controls now reload their saved values from `/api/settings`.
+
 API Documentation UI was redesigned around a developer-portal pattern: quick start, sticky in-page navigation, authentication, method/path blocks, copyable cURL, parameter table, usage endpoint, complete JSON response example, quota field table, and error/security guidance. The content follows the project's actual GET endpoints and was informed by the Way2API reference and common API reference patterns; no provider credentials or secrets are shown.
 
 Documentation UI correction: in-page navigation now scrolls explicitly to each section, code blocks fit their content instead of inheriting the application-wide tall response height, and the response example is formatted as readable two-space JSON at render time.
