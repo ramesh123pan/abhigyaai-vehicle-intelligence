@@ -219,6 +219,8 @@ API documentation navigation is tabwise: Quick start, Authentication, RC lookup,
 
 Documentation response correction: the RC Response tab now documents the live `usage` object as part of the RC response, while the separate Usage summary tab now lazily displays the standalone `/api/v1/external/usage` JSON response and its own field reference.
 
+Documentation layout correction: the generic Response tab was removed. The complete RC response now appears inside RC lookup immediately after the path-parameter table, and the complete usage response appears inside Usage summary after its endpoint details.
+
 API Documentation UI was redesigned around a developer-portal pattern: quick start, sticky in-page navigation, authentication, method/path blocks, copyable cURL, parameter table, usage endpoint, complete JSON response example, quota field table, and error/security guidance. The content follows the project's actual GET endpoints and was informed by the Way2API reference and common API reference patterns; no provider credentials or secrets are shown.
 
 Documentation UI correction: in-page navigation now scrolls explicitly to each section, code blocks fit their content instead of inheriting the application-wide tall response height, and the response example is formatted as readable two-space JSON at render time.
