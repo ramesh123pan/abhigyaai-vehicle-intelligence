@@ -213,6 +213,8 @@ External RC lookup responses now append the same live `usage` object after each 
 
 API Documentation now includes the read-only usage-summary endpoint, the `total_calls` and `total_top_up_calls` meanings, and an inline response example. Added `test/TEST_STATUS.md` as the current QA status page with automated counts, skipped prerequisites, external API coverage, route checks, load-test status, and known limitations.
 
+API documentation response examples were updated with complete representative RC and usage JSON contracts. The documentation now explains provider/cache fields, vehicle result fields, quota and top-up counters, expiry-status fields, status meanings, dates, and remaining-day values. Examples use the current `DL3SDV7431` response shape and are rendered as formatted JSON in the in-app documentation page.
+
 API Documentation UI was redesigned around a developer-portal pattern: quick start, sticky in-page navigation, authentication, method/path blocks, copyable cURL, parameter table, usage endpoint, complete JSON response example, quota field table, and error/security guidance. The content follows the project's actual GET endpoints and was informed by the Way2API reference and common API reference patterns; no provider credentials or secrets are shown.
 
 Documentation UI correction: in-page navigation now scrolls explicitly to each section, code blocks fit their content instead of inheriting the application-wide tall response height, and the response example is formatted as readable two-space JSON at render time.
