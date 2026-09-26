@@ -215,6 +215,8 @@ API Documentation now includes the read-only usage-summary endpoint, the `total_
 
 API documentation response examples were updated with complete representative RC and usage JSON contracts. The documentation now explains provider/cache fields, vehicle result fields, quota and top-up counters, expiry-status fields, status meanings, dates, and remaining-day values. Examples use the current `DL3SDV7431` response shape and are rendered as formatted JSON in the in-app documentation page.
 
+API documentation navigation is tabwise: Quick start, Authentication, RC lookup, Usage summary, Response, and Errors & limits are separate panels. Only the selected panel is visible, and the large formatted response JSON and field tables are populated when the Response tab is opened.
+
 API Documentation UI was redesigned around a developer-portal pattern: quick start, sticky in-page navigation, authentication, method/path blocks, copyable cURL, parameter table, usage endpoint, complete JSON response example, quota field table, and error/security guidance. The content follows the project's actual GET endpoints and was informed by the Way2API reference and common API reference patterns; no provider credentials or secrets are shown.
 
 Documentation UI correction: in-page navigation now scrolls explicitly to each section, code blocks fit their content instead of inheriting the application-wide tall response height, and the response example is formatted as readable two-space JSON at render time.
