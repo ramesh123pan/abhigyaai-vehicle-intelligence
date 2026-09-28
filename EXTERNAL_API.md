@@ -86,6 +86,8 @@ curl -H "X-API-Key: vdesk_your_key" \
 
 The endpoint serves a valid cached MySQL response for up to 30 days. On a cache miss it uses the configured Way2API provider, stores the response, and returns it. External requests are written to the audit log with the API client name and vehicle number.
 
+Transient Way2API failures are retried up to two additional times when the provider explicitly returns `charged: false` with `message_code: REQUEST_FAILED` or `data.error_code: backend_down`. Charged failures, verification failures, validation errors, quota errors, and other non-transient responses are never retried. A final non-charged backend failure is not cached as vehicle data, so a later request can try the provider again.
+
 Every successful external RC response also includes the same `usage` object as `/api/v1/external/usage`. It is calculated after the current request is recorded, so the caller immediately sees updated `used_calls`, `monthly_remaining_calls`, `topup_calls`, `total_remaining_calls`, and `topup_used` values.
 
 ## Common errors

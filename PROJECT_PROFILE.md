@@ -79,6 +79,8 @@ Plan Management uses responsive pricing cards, and create/edit forms open in a m
 
 External lookup resilience: metadata logging errors are now logged to `server-err.log` but do not block a valid cache/provider response. The external API remains responsible for authentication, plan, and quota errors.
 
+Way2API transient recovery: provider responses with `charged: false` and `REQUEST_FAILED`/`backend_down` are retried up to two times. Charged or non-transient failures are not retried, and a final non-charged backend failure is not cached.
+
 Charged provider failures: the external gateway now stores the raw Way2API response in `vehicle_cache` even when Way2API returns a non-2xx verification result such as HTTP 422 with `charged: true`. The response is returned with its provider status, and later requests use the cached result within the cache TTL to avoid another paid call. Usage rows are finalized for both successful and failed provider responses.
 
 Cached charged failures preserve their provider HTTP status. A cached Way2API body with `charged: true`, `success: false`, and `status_code: 422` is returned by the gateway as HTTP 422 rather than being mislabeled HTTP 200.
