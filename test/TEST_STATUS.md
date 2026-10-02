@@ -71,7 +71,7 @@ Three simultaneous requests for `HR05BM5363` were executed against `/api/v1/exte
 
 Follow-up source test on port 4174 with Redis enabled and the same registration returned HTTP 200 for all three simultaneous requests, each with `_cache.source: mysql` and `_cache.provider: way2api`, completing in about 170 ms. This confirms that this particular run was served from the local MySQL cache; it was not a live provider-call test. A cache-miss queue test requires a registration not already cached and may incur provider usage.
 
-The five-user guide and result interpretation are documented in [RC_CONCURRENT_USER_GUIDE.md](../RC_CONCURRENT_USER_GUIDE.md). The HR02AH0041 five-request run exposed and fixed a BullMQ completion API error; the follow-up run returned four cached `200` responses and one expected `429 Monthly plan quota exceeded` response after the test key quota was exhausted.
+The five-user guide and result interpretation are documented in [RC_CONCURRENT_USER_GUIDE.md](../docs/RC_CONCURRENT_USER_GUIDE.md). The HR02AH0041 five-request run exposed and fixed a BullMQ completion API error; the follow-up run returned four cached `200` responses and one expected `429 Monthly plan quota exceeded` response after the test key quota was exhausted.
 
 The database audit for `HR02AH0041` recorded 4 `way2api` rows, 4 `mysql` cache-hit rows, and 1 incomplete row from the pre-fix run. This confirms the old burst made four live provider calls; it does not represent the expected post-fix single-flight behavior.
 
@@ -92,7 +92,7 @@ The saved-vehicle cache load harness passed at 1,000 and 3,000 concurrent reques
 ## Known limitations
 
 - Five authenticated automated tests remain skipped until test credentials are supplied at runtime.
-- Redis/BullMQ integration remains unverified until a local Redis server is running; see [REDIS_LOCAL_TESTING.md](../REDIS_LOCAL_TESTING.md).
+- Redis/BullMQ integration remains unverified until a local Redis server is running; see [REDIS_LOCAL_TESTING.md](../docs/REDIS_LOCAL_TESTING.md).
 - Provider success and charged-failure paths require a configured Way2API key and a real external key for end-to-end verification.
 - Geographic location is not resolved for private/local IPs; the request records a privacy-safe location status instead.
 - Existing historical usage rows may have NULL metadata because those values cannot be reconstructed safely.
