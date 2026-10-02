@@ -1,0 +1,81 @@
+{
+  "test": "concurrent external RC lookup",
+  "date": "2026-10-01",
+  "registration": "HR05BM5363",
+  "endpoint": "/api/v1/external/rc/:registration",
+  "request_count": 3,
+  "results": [
+    {
+      "request_number": 1,
+      "http_status": 200,
+      "success": true,
+      "provider_status": "SUCCESS",
+      "message_code": "OK",
+      "charged": true,
+      "order_id": "W2A179083624991250QF",
+      "elapsed_ms": 2880,
+      "vehicle_status": "ACTIVE",
+      "expiry_statuses": {
+        "pucc": "valid",
+        "insurance": "valid",
+        "registration": "valid"
+      }
+    },
+    {
+      "request_number": 2,
+      "http_status": 200,
+      "success": true,
+      "provider_status": "SUCCESS",
+      "message_code": "OK",
+      "charged": true,
+      "order_id": "W2A179083624991250QF",
+      "elapsed_ms": 2876,
+      "vehicle_status": "ACTIVE",
+      "expiry_statuses": {
+        "pucc": "valid",
+        "insurance": "valid",
+        "registration": "valid"
+      }
+    },
+    {
+      "request_number": 3,
+      "http_status": 200,
+      "success": true,
+      "provider_status": "SUCCESS",
+      "message_code": "OK",
+      "charged": true,
+      "order_id": "W2A179083624991250QF",
+      "elapsed_ms": 2879,
+      "vehicle_status": "ACTIVE",
+      "expiry_statuses": {
+        "pucc": "valid",
+        "insurance": "valid",
+        "registration": "valid"
+      }
+    }
+  ],
+  "assessment": {
+    "all_responses_json": true,
+    "all_http_requests_succeeded": true,
+    "same_provider_order_id": true,
+    "same_result_observed": true,
+    "provider_call_deduplication_proven": false,
+    "note": "The first run did not expose an application cache marker, so its exact source cannot be proven from that response alone. A follow-up Redis-enabled run on port 4174 returned _cache.source=mysql for all three requests in about 170 ms, confirming the follow-up used the local MySQL cache. Sensitive owner, address, chassis, engine, and policy fields were intentionally excluded from this report.",
+    "follow_up": {
+      "redis_enabled": true,
+      "cache_source": "mysql",
+      "request_count": 3,
+      "all_http_statuses": [200, 200, 200],
+      "approx_elapsed_ms": [168, 171, 172],
+      "live_provider_call_proven": false
+    },
+    "database_usage_audit": {
+      "total_usage_rows_for_registration": 9,
+      "local_mysql_cache_hits": 4,
+      "live_way2api_rows": 4,
+      "incomplete_rows": 1,
+      "queue_rows": 0,
+      "interpretation": "The first five-request run created four Way2API usage rows and one incomplete row before the BullMQ wait bug was fixed. The later four successful responses created four MySQL cache-hit rows. The later quota-rejected request did not create a usage row. The four live rows reflect the pre-fix run; the Redis single-flight fix is intended to reduce a future cache-miss burst to one provider job."
+    }
+  }
+}

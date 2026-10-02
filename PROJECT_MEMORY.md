@@ -1,5 +1,47 @@
 # Vehicle Desk — Project Memory
 
+## Modular refactor — 2026-09-28
+
+Started a safe staged refactor. Runtime configuration, database infrastructure, signed-session security, and vehicle domain validation/expiry normalization now live under `src/` and are imported by `server.js`. The large route implementation remains in `server.js` until route/controller/repository/worker extraction is completed and verified.
+
+Request timeout/body-limit handling, authentication guarding, error response formatting, and liveness/readiness route handling are now also extracted under `src/middleware` and `src/routes` and wired into the server.
+
+Vehicle-cache persistence is now extracted to `src/repositories/vehicle.repository.js` and used by records, dashboard, and deletion paths; usage and admin repositories remain to be extracted.
+
+Usage key-detail reads are now extracted to `src/repositories/usage.repository.js`; admin and route/controller extraction remains incomplete.
+
+Saved Vehicles listing and deletion are now handled by `src/controllers/vehicle.controller.js`; the remaining business endpoints still require controller extraction.
+
+Session status and logout are now handled by `src/controllers/auth.controller.js`; login and other business routes remain in the legacy handler pending migration.
+
+Login now dispatches to `src/controllers/auth.controller.js`; the old inline login block has been removed.
+
+Audit listing and event creation now dispatch through `src/controllers/audit.controller.js`; external lookup remains.
+
+Admin creation and listing now dispatch through `src/controllers/admin.controller.js`; admin update/deactivation and other business routes remain in the legacy handler.
+
+Admin update and deactivation now also dispatch through `src/controllers/admin.controller.js`; the admin CRUD group is migrated.
+
+API-plan and top-up-package CRUD now dispatch through `src/controllers/plan.controller.js`; profile/settings, API-key, usage, and external lookup routes remain.
+
+Profile retrieval/update and password changes now dispatch through `src/controllers/profile.controller.js`; settings and other business routes remain.
+
+Protected settings and public branding endpoints now dispatch through `src/controllers/settings.controller.js`; API-key, usage, audit, and external lookup routes remain.
+
+External API-key creation/listing, deactivation, regeneration, and plan assignment now dispatch through `src/controllers/api-key.controller.js`; key update, usage, audit, and external lookup routes remain.
+
+External API-key updates now also dispatch through `src/controllers/api-key.controller.js`; the key lifecycle group is migrated.
+
+Usage summary and daily-count endpoints now dispatch through `src/controllers/usage.controller.js`; audit and external lookup routes remain.
+
+## Scalability hardening — 2026-09-28
+
+Added bounded request bodies and timeouts, liveness/readiness endpoints, short-lived caching for static JS/CSS, shutdown-aware responses, graceful shutdown of the HTTP server, BullMQ/Redis resources, and MySQL pool, Redis-backed external API rate windows with a local fallback, and signed stateless admin session cookies using `SESSION_SECRET`. The complete architecture and scaling boundary are documented in `ARCHITECTURE.md`. JavaScript syntax, diff checks, and the available test command passed; live checks returned 200 for liveness, readiness, and the root page, and SIGINT shutdown was observed. Redis was configured but unavailable locally, so BullMQ and Redis-rate-window behavior remain unverified. Production must use the same strong `SESSION_SECRET` across all web instances; rotating it invalidates all sessions.
+
+Redis startup now attempts one connection and falls back cleanly when the configured service is unreachable; repeated local Redis connection errors are avoided. This fallback is not suitable for multiple production instances.
+
+Latest verification passed syntax, diff, and available automated tests; live liveness/readiness returned 200 and graceful shutdown completed. Redis and authenticated test credentials were unavailable locally, so distributed and authenticated paths remain unverified.
+
 ## Production deployment — 2026-09-23
 
 CyberPanel Git is attached to `rcvd.xims.au` from the GitHub `main` branch. The MySQL dump was imported into `xims_rcvd`; the server verified the application tables, 5 `vehicle_cache` records, and 2 `admins` records. PM2 process `abhigyaai` is online and serves port 4173. The production `.env` is kept only on the server. A real `WAY2API_API_KEY` still needs to be entered before live provider calls can run.
@@ -264,7 +306,37 @@ Authenticated test verification completed on 2026-09-25: `npm test` returned 7 p
 
 Admin CRUD test coverage was expanded to verify invalid-email rejection, name/email/phone/role edits, password update, login with the updated password, and deactivation. The expanded test requires a fresh `npm test` run.
 
-Executable API coverage was expanded for profile/settings validation, audit-event creation, API-key lifecycle, usage/dashboard/records/today endpoints, plan/top-up actions, and external registration validation. Browser-only interactions still require browser automation or manual QA.
+Executable API coverage was expanded for profile/settings validation, audit-event creation, API-key lifecycle, usage/dashboard/records/today endpoints, plan/top-up actions, and external registration validation. On 2026-10-01, `npm test` completed with 3 passed, 8 skipped, and 0 failed; the skips are environment-dependent (port 4173 and test credentials). Browser-only interactions still require browser automation or manual QA.
+
+The 2026-10-01 architecture audit found that the modular `src/` foundation is working but the conversion is not complete. `server.js` still contains duplicate legacy implementations, most importantly external RC lookup and remaining dashboard/auth/business routes. The next implementation step is to extract those handlers and delete the old blocks. Formal versioned migrations, live Redis/multi-instance verification, authenticated integration tests, metrics/alerts, and load testing are also still missing.
+
+The external RC lookup logic was extracted into `src/controllers/external-lookup.controller.js` and placed ahead of the old inline handlers. This changes the active dispatch boundary, but the duplicate old handlers remain in the file and must be removed before the refactor can be called complete. Live provider and Redis behavior remains unverified.
+
+The active request dispatch now routes authentication, admin, plans, profile, settings, API keys, usage, and audit endpoints through the modular controllers before the legacy implementations. Remaining extraction work is the usage-detail/dashboard/records path and deletion of the now-unreachable duplicate blocks.
+
+Dashboard, records listing, and record deletion were added to the active modular vehicle dispatch. `vehicle.repository.js` now supplies dashboard totals; the old dashboard/records code remains below as unreachable cleanup debt.
+
+Usage key detail and PDF/XLSX export now dispatch through `usage-detail.controller.js`, using the usage repository and existing export module. Setup, top-up credit, and external usage summary remain to be extracted before the legacy route blocks can be deleted.
+
+Setup, top-up credit, external usage summary, and internal `/api/rc-lookup` are now routed through modular controllers. Duplicate business route implementations were removed from `server.js`; the remaining verification work is full runtime and authenticated testing, plus the separate migration/operations improvements.
+
+Final conversion verification: a live server test run completed with 3 passed, 5 skipped, and 0 failed. Live route checks returned liveness 200, expected readiness 503 without database availability, and 401 for protected dashboard/profile/external-usage/internal-lookup requests. The server remained alive and shut down gracefully.
+
+The final prerequisite audit found no process-level database, Redis, session-secret, or test-admin credentials, and the Docker daemon is unavailable. This is why the authenticated and Redis/provider integration cases remain skipped; they were not falsely reported as passing.
+
+Redis testing documentation was added in `REDIS_LOCAL_TESTING.md`, including Docker Desktop commands, port verification, `.env` settings, startup confirmation, and the distinction between Redis availability and MySQL readiness.
+
+Redis was subsequently enabled locally in Docker (`rc-lorryinfo-redis`, `redis:7-alpine`); TCP 6379 and `redis-cli ping` (`PONG`) were verified. A project startup with `REDIS_URL` logged the BullMQ worker as enabled. The supplied admin credentials were tested without persistence and returned HTTP 401, so the five authenticated suites remain skipped until that account is present and active in the configured MySQL database.
+
+Added a Git-ignored `.env.test` with the supplied local test settings and automatic loading in `test/api.test.js`. This removes the need to export credentials in every shell, but it does not create the admin account; the configured database must contain an active matching account before authenticated tests can run.
+
+Added Redis distributed single-flight protection for external RC queue misses. The lock owner creates one BullMQ job; concurrent callers wait for the MySQL cache or receive a bounded queued response. A Redis-enabled three-request test for `HR05BM5363` confirmed all three responses came from `_cache.source: mysql`; no paid live-call assertion was made because the registration was already cached.
+
+Five concurrent `HR02AH0041` requests were tested. One first-run request exposed an incorrect BullMQ v6 completion API call; it was fixed to use `job.waitUntilFinished(queueEvents, timeout)`. The follow-up run returned four cache-hit 200 responses and one quota-protecting 429. See `RC_CONCURRENT_USER_GUIDE.md` for the reusable five-user test procedure.
+
+For fresh `UK17W2900`, five concurrent requests returned the same successful provider order ID and one cache row. The usage rows initially misclassified four joined responses as `way2api`; `external-lookup.controller.js` now records joined cache results as `mysql`/`cache_hit=1`. Historical usage rows remain unchanged for audit integrity.
+
+Fixed a process-crashing dispatch bug in `src/routes/system.routes.js`: handled health requests now return `true` to prevent the legacy handler from writing a second response. Live checks confirmed liveness 200, expected readiness 503 without database availability, and external registration validation 400 while the server stayed alive.
 
 External gateway usage rows now receive the vehicle registration, source (`mysql` or `way2api`), HTTP status, and cache-hit flag after the lookup completes. Existing rows created before this correction may still have NULL vehicle/source/status fields and cannot be reliably reconstructed.
 
@@ -277,3 +349,6 @@ Verification: `node --check server.js` and `node --check app.js` passed; the ver
 - Chrome reproduced the top-up bug as a native GET form submission. The Save control is now explicitly non-submit and the guarded API handler was verified by creating and editing a package in the browser; the updated row rendered correctly without a page reload.
 - Top-up CRUD tests now cover all form fields on create/edit and verify deactivation plus persisted inactive status; the manual test case documents invalid-field and duplicate-name checks.
 - Full local checks on 2026-09-25: all JavaScript syntax checks and diff checks passed; npm test had 3 passed, 5 skipped, 0 failed; unauthenticated/auth contract and external validation passed; authenticated CRUD tests remain skipped without test credentials; main local page routes returned HTTP 200.
+# User guide page — 2026-10-01
+
+Added the authenticated shared-shell `/user-guide` route and Vehicle Services menu entry. The page explains application search, MySQL cache-first behavior, Redis/BullMQ single-flight concurrency, API Usage source interpretation, API keys, quotas/top-ups, errors, and local testing. `node --check app.js`, `node --check server.js`, and `git diff --check` passed. Browser navigation and authenticated visual verification remain pending; no server restart was performed for this documentation/UI-only update.

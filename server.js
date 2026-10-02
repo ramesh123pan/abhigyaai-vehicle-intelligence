@@ -1,9 +1,33 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const mysql = require('mysql2/promise');
 const crypto = require('crypto');
 const dns = require('dns').promises;
+const { Queue, Worker, QueueEvents } = require('bullmq');
+const IORedis = require('ioredis');
+const runtime = require('./src/config/runtime');
+const { createDatabasePool, healthCheck } = require('./src/infrastructure/database');
+const { parseCookies, createSessionCookie, readSession } = require('./src/security/session');
+const { validRegistration: validateRegistration, expiryLabel: vehicleExpiryLabel, addExpiryStatuses: addVehicleExpiryStatuses } = require('./src/services/vehicle.service');
+const { createProviderWorker } = require('./src/workers/provider-worker');
+const { readJson: readJsonBody, applyRequestTimeout } = require('./src/middleware/request');
+const { createAuthMiddleware } = require('./src/middleware/auth');
+const { createSystemRoutes } = require('./src/routes/system.routes');
+const { createVehicleRepository } = require('./src/repositories/vehicle.repository');
+const { createUsageRepository } = require('./src/repositories/usage.repository');
+const { createVehicleController } = require('./src/controllers/vehicle.controller');
+const { createAuthController } = require('./src/controllers/auth.controller');
+const { createAdminController } = require('./src/controllers/admin.controller');
+const { createPlanController } = require('./src/controllers/plan.controller');
+const { createProfileController } = require('./src/controllers/profile.controller');
+const { createSettingsController } = require('./src/controllers/settings.controller');
+const { createApiKeyController } = require('./src/controllers/api-key.controller');
+const { createUsageController } = require('./src/controllers/usage.controller');
+const { createAuditController } = require('./src/controllers/audit.controller');
+const { createExternalLookupController } = require('./src/controllers/external-lookup.controller');
+const { createUsageDetailController } = require('./src/controllers/usage-detail.controller');
+const { createSetupController } = require('./src/controllers/setup.controller');
+const { createLookupController } = require('./src/controllers/lookup.controller');
 
 const root = __dirname;
 const envPath = path.join(root, '.env');
@@ -12,14 +36,25 @@ if (fs.existsSync(envPath)) for (const line of fs.readFileSync(envPath, 'utf8').
   if (match && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '');
 }
 
-const port = Number(process.env.PORT || 4173);
+const port = runtime.port;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
-const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const REFRESH_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+const CACHE_TTL_MS = runtime.cacheTtlMs;
+const REFRESH_COOLDOWN_MS = runtime.refreshCooldownMs;
 const sessions = new Map();
 const apiRateWindows = new Map();
-const sessionTtl = 8 * 60 * 60 * 1000;
-const pool = mysql.createPool({ host: process.env.MYSQL_HOST || '127.0.0.1', port: Number(process.env.MYSQL_PORT || 3306), user: process.env.MYSQL_USER || 'root', password: process.env.MYSQL_PASSWORD || '', database: process.env.MYSQL_DATABASE || 'lorryinfo', waitForConnections: true, connectionLimit: 10 });
+const sessionTtl = runtime.sessionTtlMs;
+const pool = createDatabasePool(runtime.mysql);
+const queueEnabled = runtime.queueEnabled;
+const redisUrl = runtime.redisUrl;
+const queueWaitMs = runtime.queueWaitMs;
+const queueDeadlineMs = runtime.queueDeadlineMs;
+const queueMaxWaiting = runtime.queueMaxWaiting;
+const requestTimeoutMs = runtime.requestTimeoutMs;
+const bodyLimitBytes = runtime.bodyLimitBytes;
+const sessionSecret = runtime.sessionSecret;
+let externalQueue = null, externalWorker = null, externalQueueEvents = null, redisConnection = null;
+const localFlights = new Map();
+let shuttingDown = false;
 
 async function initDatabase() {
   await pool.query(`CREATE TABLE IF NOT EXISTS vehicle_cache (
@@ -54,6 +89,7 @@ async function initDatabase() {
     PRIMARY KEY (id), INDEX idx_audit_created (created_at), INDEX idx_audit_admin (admin_id)
   )`);
   await pool.query(`CREATE TABLE IF NOT EXISTS app_settings (setting_key VARCHAR(80) NOT NULL PRIMARY KEY, setting_value TEXT NULL, updated_by BIGINT UNSIGNED NULL, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+  await pool.query("INSERT IGNORE INTO app_settings(setting_key,setting_value) VALUES ('puccRefreshDays','7'),('insuranceRefreshDays','7'),('registrationRefreshDays','7'),('responseMessageOverrides',?)", [JSON.stringify({ OK:'Vehicle details are ready.', INVALID_INPUT:'Please check the vehicle registration number and try again.', REQUEST_FAILED:'We could not complete this request right now. Please try again shortly.', PROVIDER_UNAVAILABLE:'Vehicle information is temporarily unavailable. Please try again shortly.', INTERNAL_ERROR:'We could not complete this request right now. Please try again shortly.', VERIFICATION_FAILED:'Vehicle verification could not be completed.', NO_RECORD_FOUND:'No vehicle record was found for this registration.', SOURCE_UNAVAILABLE:'Vehicle information is temporarily unavailable. Please try again later.', LOOKUP_QUEUED:'Your request is being processed. Please try again shortly.', QUEUE_FULL:'Too many requests are being processed. Please try again shortly.', INVALID_API_KEY:'The supplied access key is not valid.', MISSING_API_KEY:'An access key is required.', RATE_LIMITED:'Request limit reached. Please try again later.' })]);
   await pool.query(`CREATE TABLE IF NOT EXISTS api_plans (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, name VARCHAR(100) NOT NULL, monthly_call_limit INT NOT NULL DEFAULT 1000, rate_limit_per_minute INT NOT NULL DEFAULT 60, price DECIMAL(12,2) NOT NULL DEFAULT 0, active TINYINT(1) NOT NULL DEFAULT 1, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(id), UNIQUE KEY uq_api_plan_name(name))`);
   await pool.query(`CREATE TABLE IF NOT EXISTS api_usage_logs (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, api_key_id BIGINT UNSIGNED NULL, plan_id BIGINT UNSIGNED NULL, vehicle VARCHAR(20) NULL, endpoint VARCHAR(160) NOT NULL, source VARCHAR(30) NULL, status_code INT NULL, cache_hit TINYINT(1) NOT NULL DEFAULT 0, client_ip VARCHAR(120) NULL, forwarded_for TEXT NULL, user_agent TEXT NULL, device_type VARCHAR(30) NULL, accept_language VARCHAR(255) NULL, referer VARCHAR(500) NULL, request_host VARCHAR(255) NULL, location_status VARCHAR(80) NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(id), INDEX idx_usage_created(created_at), INDEX idx_usage_key_month(api_key_id,created_at), INDEX idx_usage_plan_month(plan_id,created_at))`);
   const [usageCols]=await pool.query('SHOW COLUMNS FROM api_usage_logs'); const usageNames=new Set(usageCols.map(x=>x.Field));
@@ -88,29 +124,44 @@ async function initDatabase() {
   await pool.query("UPDATE external_api_keys k JOIN api_plans p ON p.name='Default' SET k.plan_id=p.id WHERE k.plan_id IS NULL");
 }
 function send(res, status, body, type = 'application/json; charset=utf-8') { if(type.startsWith('application/json')){try{const payload=JSON.parse(body);if(payload&&payload.data&&(payload.data.result||payload.data.rc_number)){body=JSON.stringify(addExpiryStatuses(payload));}if(payload&&payload.charged===true&&payload.success===false&&Number(payload.status_code)>=400)status=Number(payload.status_code)}catch{}}res.writeHead(status, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*' }); res.end(body); }
+function jsonError(res, status, message, code) { return send(res, status, JSON.stringify({ success: false, message, ...(code ? { message_code: code } : {}) })); }
 const nativeFetch=globalThis.fetch;
 async function fetchWay2ApiWithRetry(url, options, maxRetries=2) { let last; for(let attempt=0;attempt<=maxRetries;attempt++){ try { const response=await nativeFetch(url,options),text=await response.text(); let payload; try{payload=JSON.parse(text)}catch{} const retryable=payload?.charged===false&&(payload?.message_code==='REQUEST_FAILED'||payload?.data?.error_code==='backend_down'); last={response,text,payload,attempt}; if(!retryable||attempt===maxRetries)return last; await new Promise(resolve=>setTimeout(resolve,250*(attempt+1))); } catch(error){throw error} } return last; }
 globalThis.fetch=async(url,options)=>{if(String(url).includes('way2api.com')){const result=await fetchWay2ApiWithRetry(url,options);if(result.payload?.charged===false&&(result.payload?.message_code==='REQUEST_FAILED'||result.payload?.data?.error_code==='backend_down')){const error=new Error('Way2API transient backend failure after retry');error.code='WAY2API_REQUEST_FAILED';throw error}return new Response(result.text,{status:result.response.status,statusText:result.response.statusText,headers:result.response.headers})}return nativeFetch(url,options)};
-function cookies(req) { return Object.fromEntries(String(req.headers.cookie || '').split(';').map(x => x.trim().split('=').map(decodeURIComponent)).filter(x => x.length === 2)); }
-function authenticated(req) { const token = cookies(req).rc_session, session = sessions.get(token); if (!session || session.expires < Date.now()) { if (token) sessions.delete(token); return false; } session.expires = Date.now() + sessionTtl; return true; }
-function currentSession(req) { const token=cookies(req).rc_session, session=sessions.get(token); return session && session.expires >= Date.now() ? session : null; }
+function cookies(req) { return parseCookies(req); }
+function sessionCookie(session) { return createSessionCookie(session, sessionSecret, sessionTtl); }
+function readSessionFromRequest(req) { return readSession(req, sessionSecret); }
+function authenticated(req) { return Boolean(readSessionFromRequest(req)); }
+function currentSession(req) { return readSessionFromRequest(req); }
 async function audit(req, action, vehicle, details) { const s=currentSession(req); if(s) await pool.query('INSERT INTO audit_logs (admin_id,action,vehicle,details) VALUES (?,?,?,?)',[s.adminId||null,action,vehicle||null,details?JSON.stringify(details):null]); }
 function requestMetadata(req){const forwarded=String(req.headers['x-forwarded-for']||'').trim(),ip=(forwarded.split(',')[0].trim()||String(req.socket.remoteAddress||'')).replace(/^::ffff:/,'');const ua=String(req.headers['user-agent']||'').slice(0,2000),device=/mobile|android|iphone|ipad/i.test(ua)?'Mobile':/tablet/i.test(ua)?'Tablet':ua?'Desktop/API client':'Unknown';const privateIp=/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|127\.|::1$)/.test(ip);return {clientIp:ip||null,forwardedFor:forwarded||null,userAgent:ua||null,deviceType:device,acceptLanguage:String(req.headers['accept-language']||'').slice(0,255)||null,referer:String(req.headers.referer||'').slice(0,500)||null,requestHost:String(req.headers.host||'').slice(0,255)||null,locationStatus:privateIp?'Private/local IP; geographic location unavailable':'IP captured; geographic lookup not configured'};}
 async function auditExternal(req,key,action,vehicle,details) { if(key.id) await pool.query('UPDATE api_usage_logs SET vehicle=?,source=?,status_code=?,cache_hit=? WHERE id=?',[vehicle,details?.source||null,details?.statusCode??200,details?.source==='mysql'?1:0,details.usageId]); try{await pool.query('INSERT INTO audit_logs (admin_id,action,vehicle,details) VALUES (NULL,?,?,?)',[action,vehicle,JSON.stringify({...details,client:key.name})])}catch(error){console.error('Audit log write failed:',error.code||'ERROR',error.message)} }
 async function finalizeUsage(usageId,fields){if(!usageId)return;try{await pool.query('UPDATE api_usage_logs SET vehicle=COALESCE(?,vehicle),source=COALESCE(?,source),status_code=COALESCE(?,status_code),cache_hit=COALESCE(?,cache_hit) WHERE id=?',[fields.vehicle??null,fields.source??null,fields.statusCode??null,fields.cacheHit??null,usageId])}catch(error){console.error('Usage row finalization failed:',error.code||'ERROR',error.message)}}
-function protectedApi(req, res) { if (!authenticated(req)) { send(res, 401, JSON.stringify({ message: 'Authentication required' })); return false; } return true; }
+const authMiddleware = createAuthMiddleware({ readSession: readSessionFromRequest, unauthorized: res => send(res, 401, JSON.stringify({ message: 'Authentication required' })) });
+function protectedApi(req, res) { return authMiddleware.requireAuthentication(req, res); }
 function hashPassword(password) { return new Promise((resolve, reject) => crypto.scrypt(password, process.env.PASSWORD_PEPPER || '', 64, (error, derived) => error ? reject(error) : resolve(derived.toString('hex')))); }
 async function verifyPassword(password, stored) { const actual = await hashPassword(password); return crypto.timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(stored, 'hex')); }
-function readJson(req) { return new Promise((resolve, reject) => { let body = ''; req.on('data', chunk => { body += chunk; }); req.on('end', () => { try { resolve(JSON.parse(body || '{}')); } catch (error) { reject(error); } }); }); }
+const readJson = req => readJsonBody(req, bodyLimitBytes);
 function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
 function validEmail(value) { const email=normalizeEmail(value); if(email.length<5||email.length>190||/\s/.test(email)||email.includes('..')) return false; const parts=email.split('@'); if(parts.length!==2||!parts[0]||!parts[1]||parts[0].length>64||parts[1].length>253) return false; return /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(parts[0]) && /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/.test(parts[1]); }
 function validPhone(value) { return /^\+?[1-9]\d{9,14}$/.test(String(value||'').replace(/[\s()-]/g,'')); }
 function hashApiKey(value) { return crypto.createHash('sha256').update(String(value)).digest('hex'); }
-const validStateCodes=new Set('AN AP AR AS BR CH CG DD DL DN GA GJ HR HP JK JH KA KL LA LD MP MH MN ML MZ NL OD OR PB PY RJ SK TN TS TR UP UK WB'.split(' '));
-function validRegistration(value){const input=String(value||'').toUpperCase();if(/^\d{2}BH\d{4}[A-Z]{1,2}$/.test(input))return true;const standard=input.match(/^([A-Z]{2})(\d{2})([A-Z]{1,3})(\d{4})$/);if(standard)return validStateCodes.has(standard[1])&&Number(standard[2])>=1;const delhi=input.match(/^DL([A-Z0-9]{2,3})([A-Z]{1,3})(\d{4})$/);return !!delhi;}
-function expiryLabel(value){if(!value)return {status:'unavailable',message:'Expiry date unavailable',date:null,days_remaining:null};const raw=String(value).trim(),m=raw.match(/^(\d{4})[-\/]([01]?\d)[-\/]([0-3]?\d)$/)||raw.match(/^([0-3]?\d)[-\/]([01]?\d)[-\/](\d{4})$/);let date;if(m)date=m[1].length===4?new Date(Date.UTC(+m[1],+m[2]-1,+m[3])):new Date(Date.UTC(+m[3],+m[2]-1,+m[1]));else date=new Date(raw);if(Number.isNaN(date.getTime()))return {status:'unavailable',message:'Expiry date unavailable',date:raw,days_remaining:null};const today=new Date();today.setHours(0,0,0,0);const target=new Date(date);target.setHours(0,0,0,0);const days=Math.ceil((target-today)/86400000),formatted=target.toISOString().slice(0,10);if(days<0)return {status:'expired',message:`Expired on ${formatted}`,date:formatted,days_remaining:days};if(days<=7)return {status:'expiring_soon',message:`Expires in ${days} day${days===1?'':'s'}`,date:formatted,days_remaining:days};return {status:'valid',message:`Valid until ${formatted}`,date:formatted,days_remaining:days}}
-function addExpiryStatuses(payload){try{const out=typeof payload==='string'?JSON.parse(payload):JSON.parse(JSON.stringify(payload)),d=out?.data?.result||out?.data||out;const pucc=d?.pucc_upto||d?.rc_pucc_upto,insurance=d?.insurance_upto||d?.rc_insurance_upto,registration=d?.registration_upto||d?.registration_expiry||d?.fit_up_to||d?.rc_fit_upto;out.expiry_status={pucc:expiryLabel(pucc),insurance:expiryLabel(insurance),registration:expiryLabel(registration)};return out}catch{return payload}}
-async function externalKey(req) { const raw=req.headers['x-api-key'] || String(req.headers.authorization||'').replace(/^Bearer\s+/i,''); if(!raw)return {error:'Missing API key'}; const [[row]]=await pool.query('SELECT * FROM external_api_keys WHERE key_hash=? AND active=1 LIMIT 1',[hashApiKey(raw)]); if(!row)return {error:'Invalid API key'}; if(row.expires_at&&new Date(row.expires_at)<new Date())return {error:'API key expired'}; const metadata=requestMetadata(req),allowed=String(row.allowed_ips||'').split(',').map(x=>x.trim()).filter(Boolean);if(allowed.length&&!allowed.includes(metadata.clientIp))return {error:'IP address is not allowed'};const now=Date.now(),minute=Math.floor(now/60000),day=new Date().toISOString().slice(0,10),key=`${row.id}:${day}:${minute}`,state=apiRateWindows.get(key)||{minute:0};if(state.minute>=row.rate_limit_per_minute)return {error:'Per-minute rate limit exceeded',status:429};state.minute++;apiRateWindows.set(key,state);const dayKey=`${row.id}:${day}:daily`,daily=apiRateWindows.get(dayKey)||{daily:0};if(daily.daily>=row.daily_limit)return {error:'Daily API quota exceeded',status:429};daily.daily++;apiRateWindows.set(dayKey,daily);await pool.query('UPDATE external_api_keys SET last_used_at=NOW() WHERE id=?',[row.id]);return {row,metadata}; }
+async function consumeRateLimit(key, limit, windowSeconds) {
+  if (redisConnection && redisConnection.status === 'ready') {
+    const count = await redisConnection.incr(`vdesk:ratelimit:${key}`);
+    if (count === 1) await redisConnection.expire(`vdesk:ratelimit:${key}`, windowSeconds);
+    return count <= limit;
+  }
+  const now = Date.now(), state = apiRateWindows.get(key) || { count: 0, expires: now + windowSeconds * 1000 };
+  if (state.expires <= now) { state.count = 0; state.expires = now + windowSeconds * 1000; }
+  state.count++;
+  apiRateWindows.set(key, state);
+  return state.count <= limit;
+}
+const validRegistration = validateRegistration;
+const expiryLabel = vehicleExpiryLabel;
+const addExpiryStatuses = addVehicleExpiryStatuses;
+async function externalKey(req) { const raw=req.headers['x-api-key'] || String(req.headers.authorization||'').replace(/^Bearer\s+/i,''); if(!raw)return {error:'Missing API key'}; const [[row]]=await pool.query('SELECT * FROM external_api_keys WHERE key_hash=? AND active=1 LIMIT 1',[hashApiKey(raw)]); if(!row)return {error:'Invalid API key'}; if(row.expires_at&&new Date(row.expires_at)<new Date())return {error:'API key expired'}; const metadata=requestMetadata(req),allowed=String(row.allowed_ips||'').split(',').map(x=>x.trim()).filter(Boolean);if(allowed.length&&!allowed.includes(metadata.clientIp))return {error:'IP address is not allowed'};const now=Date.now(),day=new Date().toISOString().slice(0,10),minute=Math.floor(now/60000),minuteAllowed=await consumeRateLimit(`${row.id}:${day}:${minute}`,Number(row.rate_limit_per_minute),60);if(!minuteAllowed)return {error:'Per-minute rate limit exceeded',status:429};const dailyAllowed=await consumeRateLimit(`${row.id}:${day}:daily`,Number(row.daily_limit),86400);if(!dailyAllowed)return {error:'Daily API quota exceeded',status:429};await pool.query('UPDATE external_api_keys SET last_used_at=NOW() WHERE id=?',[row.id]);return {row,metadata}; }
 async function externalKeyIdentity(req) { const raw=req.headers['x-api-key'] || String(req.headers.authorization||'').replace(/^Bearer\s+/i,''); if(!raw)return {error:'Missing API key'}; const [[row]]=await pool.query('SELECT * FROM external_api_keys WHERE key_hash=? AND active=1 LIMIT 1',[hashApiKey(raw)]); if(!row)return {error:'Invalid API key'}; if(row.expires_at&&new Date(row.expires_at)<new Date())return {error:'API key expired'}; const metadata=requestMetadata(req),allowed=String(row.allowed_ips||'').split(',').map(x=>x.trim()).filter(Boolean);if(allowed.length&&!allowed.includes(metadata.clientIp))return {error:'IP address is not allowed'}; return {row,metadata}; }
 async function emailDnsError(value) { const email=normalizeEmail(value),domain=email.split('@')[1]; if(!validEmail(email)) return 'Enter a valid RFC-style email address'; try { const [mx,ns]=await Promise.all([dns.resolveMx(domain),dns.resolveNs(domain)]); if(!mx?.length) return 'Email domain has no MX mail record'; if(!ns?.length) return 'Email domain has no NS nameserver record'; return null; } catch { return 'Email domain could not be verified through DNS (NS/MX)'; } }
 
@@ -130,113 +181,143 @@ async function externalUsageSummary(key) {
   return { total_calls: monthly, total_top_up_calls: totalTopUp, used_calls: used, monthly_remaining_calls: remaining, topup_calls: topup, total_remaining_calls: remaining + topup, topup_used: Math.max(0, Math.min(totalTopUp, used - monthly)) };
 }
 async function addExternalUsage(payload, key) { try { const parsed = JSON.parse(payload), usage = await externalUsageSummary(key); if (usage) parsed.usage = usage; return JSON.stringify(parsed); } catch { return payload; } }
-const server = http.createServer((req, res) => {
-  const externalVehiclePath=req.url.match(/^\/api\/(?:v1\/)?external\/rc\/([^?]+)/);
-  if(req.method==='GET'&&externalVehiclePath){const candidate=decodeURIComponent(externalVehiclePath[1]).toUpperCase().replace(/\s+/g,'');if(!validRegistration(candidate))return send(res,400,JSON.stringify({success:false,message:'Invalid registration number. Use the four-digit final series, for example UP16AN0593.'}))}
-  if (req.method === 'GET' && (req.url.startsWith('/api/external/rc/') || req.url.startsWith('/api/v1/external/rc/'))) { (async()=>{try{const key=await externalKey(req);if(key.error)return send(res,key.status||401,JSON.stringify({success:false,message:key.error}));const prefix=req.url.startsWith('/api/v1/')?'/api/v1/external/rc/':'/api/external/rc/',vehicle=decodeURIComponent(req.url.slice(prefix.length)).toUpperCase().replace(/\s+/g,'');if(!validRegistration(vehicle)){await finalizeUsage(key.usageId,{vehicle,statusCode:400,source:'gateway',cacheHit:0});return send(res,400,JSON.stringify({success:false,message:'Invalid registration number'}))}await finalizeUsage(key.usageId,{vehicle});const [cached]=await pool.query('SELECT * FROM vehicle_cache WHERE vehicle=? ORDER BY fetched_at DESC LIMIT 1',[vehicle]);const entry=cached[0],now=Date.now();if(entry&&now-Number(entry.fetched_at)<CACHE_TTL_MS){await finalizeUsage(key.usageId,{vehicle,source:'mysql',statusCode:200,cacheHit:1});const cachedPayload=JSON.stringify(Object.assign(JSON.parse(entry.response_json),{_cache:{source:'mysql',provider:entry.provider}}));const cachedWithUsage=await addExternalUsage(cachedPayload,key);return send(res,200,cachedWithUsage)}const apiKey=process.env.WAY2API_API_KEY;if(!apiKey){await finalizeUsage(key.usageId,{vehicle,source:'way2api',statusCode:500,cacheHit:0});return send(res,500,JSON.stringify({success:false,message:'Way2API is not configured'}))}const upstream=await fetch(`${process.env.WAY2API_BASE_URL||'https://app.way2api.com/api/v1'}/rc/verify`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${apiKey}`},body:JSON.stringify({rc_number:vehicle})}),text=await upstream.text();await pool.query('INSERT INTO vehicle_cache(vehicle,provider,response_json,fetched_at,last_refresh_at) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE response_json=VALUES(response_json),fetched_at=VALUES(fetched_at),last_refresh_at=VALUES(last_refresh_at)',[vehicle,'way2api',text,now,now]);await finalizeUsage(key.usageId,{vehicle,source:'way2api',statusCode:upstream.status,cacheHit:0});try{await auditExternal(req,key.row,'external_vehicle_searched',vehicle,{source:'way2api',usageId:key.usageId,statusCode:upstream.status})}catch(error){console.error('External audit logging failed:',error.code||'ERROR',error.message)}const providerWithUsage=await addExternalUsage(text,key);send(res,upstream.status,providerWithUsage,upstream.headers.get('content-type')||'application/json; charset=utf-8')}catch(e){console.error('External lookup failed:',e.code||'ERROR',e.message);send(res,500,JSON.stringify({success:false,message:'External lookup failed',detail:e.code||e.message}))}})();return; }
-  const detailApi = req.url.match(/^\/api\/usage\/keys\/(\d+)(?:\/export\.(pdf|xlsx))?$/);
-  if (req.method === 'GET' && detailApi) {
-    if (!protectedApi(req,res)) return;
-    (async()=>{try {
-      const id=detailApi[1];
-      const [[key]]=await pool.query('SELECT k.id,k.name,k.active,k.expires_at,k.application_url,k.application_address,k.plan_id,k.topup_credits,p.name AS plan_name,p.monthly_call_limit,p.price FROM external_api_keys k LEFT JOIN api_plans p ON p.id=k.plan_id WHERE k.id=?',[id]);
-      if(!key)return send(res,404,JSON.stringify({message:'API key not found'}));
-      const [[usage]]=await pool.query("SELECT COUNT(*) AS used FROM api_usage_logs WHERE api_key_id=? AND created_at>=DATE_FORMAT(CURRENT_DATE,'%Y-%m-01')",[id]);
-      const [months]=await pool.query("SELECT DATE_FORMAT(created_at,'%Y-%m') AS month,COUNT(*) AS calls,SUM(cache_hit) AS cache_hits FROM api_usage_logs WHERE api_key_id=? GROUP BY month ORDER BY month DESC",[id]);
-      const [recent]=await pool.query('SELECT vehicle,endpoint,status_code,cache_hit,client_ip,forwarded_for,user_agent,device_type,accept_language,referer,request_host,location_status,created_at FROM api_usage_logs WHERE api_key_id=? ORDER BY id DESC LIMIT 100',[id]);
-      const [bills]=await pool.query('SELECT id,package_name,credits,amount,reference,created_at FROM api_topup_ledger WHERE api_key_id=? ORDER BY id DESC LIMIT 100',[id]);
-      if(detailApi[2])return await require('./usage-export')(res,detailApi[2],key,recent);
-      send(res,200,JSON.stringify({key:{...key,used:Number(usage.used)},months,bills,recent}));
-    }catch(error){send(res,500,JSON.stringify({message:'Unable to load key details'}))}})();return;
-  }
-  if(req.method==='GET'&&req.url==='/api/usage'){if(!protectedApi(req,res))return;(async()=>{const month=new Date().toISOString().slice(0,7),[rows]=await pool.query("SELECT k.id,k.name,k.active,p.name AS plan_name,p.monthly_call_limit,COUNT(u.id) AS used FROM external_api_keys k LEFT JOIN api_plans p ON p.id=k.plan_id LEFT JOIN api_usage_logs u ON u.api_key_id=k.id AND u.created_at>=STR_TO_DATE(CONCAT(?, '-01'), '%Y-%m-%d') GROUP BY k.id,k.name,k.active,p.name,p.monthly_call_limit ORDER BY k.created_at DESC",[month]);const [recent]=await pool.query("SELECT k.id AS key_id,k.name AS key_name,u.vehicle,u.endpoint,u.source,u.status_code,u.cache_hit,u.client_ip,u.forwarded_for,u.user_agent,u.device_type,u.accept_language,u.referer,u.request_host,u.location_status,u.created_at FROM api_usage_logs u JOIN external_api_keys k ON k.id=u.api_key_id ORDER BY u.created_at DESC LIMIT 100");send(res,200,JSON.stringify({month,keys:rows,recent}))})();return;}
-  if(req.method==='GET'&&req.url==='/api/usage/today'){if(!protectedApi(req,res))return;(async()=>{const [[row]]=await pool.query('SELECT COUNT(*) AS total FROM api_usage_logs WHERE created_at>=CURRENT_DATE');send(res,200,JSON.stringify({today:Number(row.total||0)}))})();return;}
-  if(req.method==='POST'&&req.url.match(/^\/api\/external-keys\/\d+\/topup$/)){if(!protectedApi(req,res))return;(async()=>{try{const id=Number(req.url.split('/')[3]),p=await readJson(req),packageId=Number(p.packageId),reference=String(p.reference||'admin-confirmed').slice(0,120);const [[pkg]]=await pool.query('SELECT id,name,credits,price FROM api_topup_packages WHERE id=? AND active=1',[packageId]);if(!pkg)return send(res,400,JSON.stringify({message:'Select an active top-up package'}));const [[key]]=await pool.query('SELECT id,topup_credits FROM external_api_keys WHERE id=?',[id]);if(!key)return send(res,404,JSON.stringify({message:'API key not found'}));const next=Number(key.topup_credits||0)+Number(pkg.credits),s=currentSession(req);await pool.query('UPDATE external_api_keys SET topup_credits=? WHERE id=?',[next,id]);await pool.query('INSERT INTO api_topup_ledger(api_key_id,package_name,credits,amount,balance_after,action,reference,created_by) VALUES(?,?,?,?,?,?,?,?)',[id,pkg.name,pkg.credits,pkg.price,next,'credit',reference,s.adminId]);await audit(req,'api_key_topup_credited',null,{apiKeyId:id,packageId:pkg.id,packageName:pkg.name,credits:pkg.credits,amount:pkg.price,reference,balanceAfter:next});send(res,200,JSON.stringify({updated:true,package:pkg,topupCredits:next}))}catch(e){send(res,400,JSON.stringify({message:e.message}))}})();return;}
-  if(req.method==='POST'&&req.url.match(/^\/api\/external-keys\/\d+\/regenerate$/)){if(!protectedApi(req,res))return;(async()=>{try{const id=req.url.split('/')[3],raw='vdesk_'+crypto.randomBytes(24).toString('hex');const [result]=await pool.query('UPDATE external_api_keys SET key_hash=?,active=1 WHERE id=?',[hashApiKey(raw),id]);if(!result.affectedRows)return send(res,404,JSON.stringify({message:'API key not found'}));send(res,200,JSON.stringify({apiKey:raw}))}catch(e){send(res,400,JSON.stringify({message:e.message}))}})();return;}
-  if(req.method==='GET'&&req.url==='/api/plans'){if(!protectedApi(req,res))return;(async()=>{await pool.query("INSERT IGNORE INTO api_plans(name,monthly_call_limit,rate_limit_per_minute,price) VALUES ('Starter',1000,30,499),('Growth',5000,120,1499),('Business',25000,300,3999),('Enterprise',100000,1000,9999)");const[rows]=await pool.query('SELECT id,name,monthly_call_limit,rate_limit_per_minute,price,active FROM api_plans ORDER BY price,name');send(res,200,JSON.stringify({plans:rows}))})();return;}
-  if(req.method==='GET'&&req.url==='/api/topup-packages'){if(!protectedApi(req,res))return;(async()=>{const[rows]=await pool.query('SELECT id,name,credits,price,active FROM api_topup_packages ORDER BY credits');send(res,200,JSON.stringify({packages:rows}))})();return;}
-  if(req.method==='POST'&&req.url==='/api/topup-packages'){if(!protectedApi(req,res))return;(async()=>{try{const p=await readJson(req),name=String(p.name||'').trim(),credits=Number(p.credits),price=Number(p.price);if(!name||!Number.isInteger(credits)||credits<1||!Number.isFinite(price)||price<0)return send(res,400,JSON.stringify({message:'Name, whole-number credits, and valid price are required'}));await pool.query('INSERT INTO api_topup_packages(name,credits,price,active) VALUES(?,?,?,?)',[name,credits,price,p.active===false?0:1]);send(res,201,JSON.stringify({created:true}))}catch(e){send(res,400,JSON.stringify({message:e.code==='ER_DUP_ENTRY'?'Package name already exists':e.message}))}})();return;}
-  if(req.method==='PATCH'&&req.url.match(/^\/api\/topup-packages\/\d+$/)){if(!protectedApi(req,res))return;(async()=>{try{const id=Number(req.url.split('/').pop()),p=await readJson(req),name=String(p.name||'').trim(),credits=Number(p.credits),price=Number(p.price);if(!Number.isInteger(id)||!name||!Number.isInteger(credits)||credits<1||!Number.isFinite(price)||price<0)return send(res,400,JSON.stringify({message:'Name, whole-number credits, and valid price are required'}));const [[existing]]=await pool.query('SELECT id FROM api_topup_packages WHERE id=?',[id]);if(!existing)return send(res,404,JSON.stringify({message:'Package not found'}));await pool.query('UPDATE api_topup_packages SET name=?,credits=?,price=?,active=? WHERE id=?',[name,credits,price,p.active?1:0,id]);send(res,200,JSON.stringify({updated:true}))}catch(e){send(res,400,JSON.stringify({message:e.code==='ER_DUP_ENTRY'?'Package name already exists':e.message}))}})();return;}
-  if(req.method==='DELETE'&&req.url.match(/^\/api\/topup-packages\/\d+$/)){if(!protectedApi(req,res))return;(async()=>{const id=Number(req.url.split('/').pop());const[result]=await pool.query('UPDATE api_topup_packages SET active=0 WHERE id=?',[id]);if(!result.affectedRows)return send(res,404,JSON.stringify({message:'Package not found'}));send(res,200,JSON.stringify({updated:true}))})();return;}
-  if(req.method==='POST'&&req.url==='/api/plans'){if(!protectedApi(req,res))return;(async()=>{try{const p=await readJson(req),limit=Number(p.monthlyCallLimit),rate=Number(p.rateLimitPerMinute);if(!String(p.name||'').trim()||!Number.isInteger(limit)||limit<1||!Number.isInteger(rate)||rate<1)return send(res,400,JSON.stringify({message:'Name, monthly call limit, and rate limit are required'}));await pool.query('INSERT INTO api_plans(name,monthly_call_limit,rate_limit_per_minute,price,active) VALUES(?,?,?,?,?)',[p.name,limit,rate,Number(p.price||0),p.active===false?0:1]);send(res,201,JSON.stringify({created:true}))}catch(e){send(res,400,JSON.stringify({message:e.code==='ER_DUP_ENTRY'?'Plan name already exists':e.message}))}})();return;}
-  if(req.method==='PATCH'&&req.url.startsWith('/api/plans/')){if(!protectedApi(req,res))return;(async()=>{try{const id=Number(req.url.split('/').pop()),p=await readJson(req),name=String(p.name||'').trim(),limit=Number(p.monthlyCallLimit),rate=Number(p.rateLimitPerMinute),price=Number(p.price||0);if(!Number.isInteger(id)||!name||!Number.isInteger(limit)||limit<1||!Number.isInteger(rate)||rate<1||!Number.isFinite(price)||price<0)return send(res,400,JSON.stringify({message:'Valid plan name, limits, and price are required'}));const [result]=await pool.query('UPDATE api_plans SET name=?,monthly_call_limit=?,rate_limit_per_minute=?,price=?,active=? WHERE id=?',[name,limit,rate,price,p.active?1:0,id]);if(!result.affectedRows)return send(res,404,JSON.stringify({message:'Plan not found'}));send(res,200,JSON.stringify({updated:true}))}catch(e){send(res,400,JSON.stringify({message:e.code==='ER_DUP_ENTRY'?'Plan name already exists':e.message}))}})();return;}
-  if(req.method==='POST'&&req.url.match(/^\/api\/external-keys\/\d+\/plan$/)){if(!protectedApi(req,res))return;(async()=>{try{const id=req.url.split('/')[3],p=await readJson(req),[[plan]]=await pool.query('SELECT id FROM api_plans WHERE id=? AND active=1',[p.planId]);if(!plan)return send(res,400,JSON.stringify({message:'Active plan not found'}));await pool.query('UPDATE external_api_keys SET plan_id=? WHERE id=?',[p.planId,id]);send(res,200,JSON.stringify({updated:true}))}catch(e){send(res,400,JSON.stringify({message:e.message}))}})();return;}
-  if(req.method==='GET'&&/^\/api\/(?:v1\/)?external\/usage(?:\?|$)/.test(req.url)){(async()=>{try{const key=await externalKeyIdentity(req);if(key.error)return send(res,key.status||401,JSON.stringify({success:false,message:key.error}));const [[plan]]=await pool.query('SELECT id,name,monthly_call_limit,rate_limit_per_minute,price FROM api_plans WHERE id=? AND active=1 LIMIT 1',[key.row.plan_id]);if(!plan)return send(res,403,JSON.stringify({success:false,message:'API plan is not active'}));const month=new Date().toISOString().slice(0,7),[[usage]]=await pool.query("SELECT COUNT(*) AS used FROM api_usage_logs WHERE api_key_id=? AND created_at>=STR_TO_DATE(CONCAT(?, '-01'), '%Y-%m-%d')",[key.row.id,month]),[[topupTotals]]=await pool.query("SELECT COALESCE(SUM(CASE WHEN action='credit' THEN credits ELSE 0 END),0) AS total_top_up_calls FROM api_topup_ledger WHERE api_key_id=?",[key.row.id]),used=Number(usage.used||0),monthly=Number(plan.monthly_call_limit||0),totalTopUp=Number(topupTotals.total_top_up_calls||0),topup=Number(key.row.topup_credits||0),remaining=Math.max(0,monthly-used),totalRemaining=remaining+topup;return send(res,200,JSON.stringify({success:true,period:month,plan:{id:plan.id,name:plan.name,monthly_allowance:monthly},usage:{total_calls:monthly,total_top_up_calls:totalTopUp,used_calls:used,monthly_remaining_calls:remaining,topup_calls:topup,total_remaining_calls:totalRemaining,topup_used:used>=monthly?Math.min(totalTopUp,used-monthly):0}}))}catch(e){console.error('External usage summary failed:',e.code||'ERROR',e.message);send(res,500,JSON.stringify({success:false,message:'Unable to read API usage'}))}})();return;}
-  if (false) { return; }
-  if (req.method === 'POST' && req.url === '/api/external-keys') { if(!protectedApi(req,res))return;(async()=>{try{const p=await readJson(req);if(!String(p.name||'').trim())return send(res,400,JSON.stringify({message:'Key name is required'}));const rate=Number(p.rateLimitPerMinute??60),daily=Number(p.dailyLimit??1000),expiry=p.expiresAt?new Date(p.expiresAt):null,address=String(p.applicationAddress||'').trim();if(!Number.isInteger(rate)||rate<1||rate>10000)return send(res,400,JSON.stringify({message:'Rate limit must be a whole number between 1 and 10,000'}));if(!Number.isInteger(daily)||daily<1||daily>100000)return send(res,400,JSON.stringify({message:'Daily limit must be a whole number between 1 and 100,000'}));if(p.expiresAt&&(!expiry||Number.isNaN(expiry.getTime())))return send(res,400,JSON.stringify({message:'Expiry must be a valid date'}));const allowed=String(p.allowedIps||'').split(',').map(x=>x.trim()).filter(Boolean).join(','),raw='vdesk_'+crypto.randomBytes(24).toString('hex'),s=currentSession(req);await pool.query('INSERT INTO external_api_keys(name,key_hash,rate_limit_per_minute,daily_limit,expires_at,allowed_ips,application_address,created_by) VALUES(?,?,?,?,?,?,?,?)',[String(p.name).trim(),hashApiKey(raw),rate,daily,expiry?expiry: null,allowed||null,address||null,s.adminId]);await audit(req,'external_api_key_created',null,{name:String(p.name).trim(),applicationAddress:address||null,rateLimitPerMinute:rate,dailyLimit:daily,expiresAt:p.expiresAt||null});send(res,201,JSON.stringify({name:String(p.name).trim(),applicationAddress:address||null,apiKey:raw,rateLimitPerMinute:rate,dailyLimit:daily,expiresAt:expiry?expiry.toISOString():null,allowedIps:allowed?allowed.split(','):[],message:'Store this key securely; it will not be shown again.'}))}catch(e){send(res,400,JSON.stringify({message:e.message}))}})();return; }
-  if (req.method === 'GET' && req.url === '/api/external-keys') { if(!protectedApi(req,res))return;(async()=>{const [rows]=await pool.query('SELECT id,name,active,rate_limit_per_minute,daily_limit,expires_at,allowed_ips,application_address,last_used_at,created_at FROM external_api_keys ORDER BY created_at DESC');send(res,200,JSON.stringify({keys:rows}))})();return; }
-  if (req.method === 'PATCH' && req.url.startsWith('/api/external-keys/')) { if(!protectedApi(req,res))return;(async()=>{try{const id=req.url.split('/').pop(),p=await readJson(req),sets=[],values=[];if(p.active!==undefined){sets.push('active=?');values.push(p.active?1:0)}if(p.rateLimitPerMinute!==undefined){const n=Number(p.rateLimitPerMinute);if(!Number.isInteger(n)||n<1||n>10000)return send(res,400,JSON.stringify({message:'Rate limit must be a whole number between 1 and 10,000'}));sets.push('rate_limit_per_minute=?');values.push(n)}if(p.dailyLimit!==undefined){const n=Number(p.dailyLimit);if(!Number.isInteger(n)||n<1||n>100000)return send(res,400,JSON.stringify({message:'Daily limit must be a whole number between 1 and 100,000'}));sets.push('daily_limit=?');values.push(n)}if(p.expiresAt!==undefined){const d=p.expiresAt?new Date(p.expiresAt):null;if(p.expiresAt&&Number.isNaN(d.getTime()))return send(res,400,JSON.stringify({message:'Expiry must be a valid date'}));sets.push('expires_at=?');values.push(d)}if(p.allowedIps!==undefined){sets.push('allowed_ips=?');values.push(String(p.allowedIps||'').split(',').map(x=>x.trim()).filter(Boolean).join(',')||null)}if(!sets.length)return send(res,400,JSON.stringify({message:'No changes supplied'}));values.push(id);await pool.query(`UPDATE external_api_keys SET ${sets.join(',')} WHERE id=?`,values);await audit(req,'external_api_key_updated',null,{id});send(res,200,JSON.stringify({updated:true}))}catch(e){send(res,400,JSON.stringify({message:e.message}))}})();return; }
-  if (req.method === 'DELETE' && req.url.startsWith('/api/external-keys/')) { if(!protectedApi(req,res))return;(async()=>{const id=req.url.split('/').pop();await pool.query('UPDATE external_api_keys SET active=0 WHERE id=?',[id]);await audit(req,'external_api_key_deactivated',null,{id});send(res,200,JSON.stringify({updated:true}))})();return; }
-  if (req.method === 'GET' && req.url === '/api/auth/me') { (async()=>{ const [[count]] = await pool.query('SELECT COUNT(*) AS total FROM admins'); send(res, 200, JSON.stringify({ authenticated: authenticated(req), setupRequired: Number(count.total) === 0, access: 'admin' })); })(); return; }
-  if (req.method === 'POST' && req.url === '/api/auth/login') {
-    (async()=>{ try { const p=await readJson(req), email=normalizeEmail(p.email); if(!validEmail(email)) return send(res,400,JSON.stringify({message:'Enter a valid email address'})); const [[admin]]=await pool.query('SELECT id,name,email,phone,role,password_hash FROM admins WHERE email=? AND active=1 LIMIT 1',[email]); if(!admin || !await verifyPassword(String(p.password||''),admin.password_hash)){await pool.query('INSERT INTO audit_logs (admin_id,action,details) VALUES (NULL,?,?)',['login_failed',JSON.stringify({email})]);return send(res,401,JSON.stringify({message:'Invalid email or password'}));} const token=crypto.randomBytes(32).toString('hex'); sessions.set(token,{expires:Date.now()+sessionTtl,adminId:admin.id,role:admin.role}); await pool.query('INSERT INTO audit_logs (admin_id,action,details) VALUES (?,?,?)',[admin.id,'login',JSON.stringify({email})]); res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Set-Cookie':`rc_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${sessionTtl/1000}`}); res.end(JSON.stringify({authenticated:true,access:admin.role,name:admin.name})); } catch { send(res,400,JSON.stringify({message:'Invalid login request'})); } })(); return;
-  }
-  if (req.method === 'POST' && req.url === '/api/auth/setup') { (async()=>{ try { const [[count]]=await pool.query('SELECT COUNT(*) AS total FROM admins'); if(Number(count.total)!==0) return send(res,403,JSON.stringify({message:'Initial setup is already complete'})); const p=await readJson(req),emailError=await emailDnsError(p.email); if(!p.name||emailError||!validPhone(p.phone)||!p.password) return send(res,400,JSON.stringify({message:emailError||'Name, valid email, phone number, and password are required'})); const hash=await hashPassword(String(p.password)); await pool.query('INSERT INTO admins (name,email,phone,password_hash,role) VALUES (?,?,?,?,?)',[p.name,normalizeEmail(p.email),p.phone,hash,'admin']); send(res,201,JSON.stringify({created:true})); } catch(error){ send(res,400,JSON.stringify({message:error.code==='ER_DUP_ENTRY'?'Email already exists':error.message})); } })(); return; }
-  if (req.method === 'POST' && req.url === '/api/admins') { if(!protectedApi(req,res)) return; (async()=>{ try { const p=await readJson(req),emailError=await emailDnsError(p.email); if(!p.name||emailError||!validPhone(p.phone)||!p.password) return send(res,400,JSON.stringify({message:emailError||'Name, valid email, phone number, and password are required'})); const hash=await hashPassword(String(p.password)); await pool.query('INSERT INTO admins (name,email,phone,password_hash,role) VALUES (?,?,?,?,?)',[p.name,normalizeEmail(p.email),p.phone,hash,p.role||'admin']); send(res,201,JSON.stringify({created:true})); } catch(error){ send(res,400,JSON.stringify({message:error.code==='ER_DUP_ENTRY'?'Email already exists':error.message})); } })(); return; }
-  if (req.method === 'GET' && req.url === '/api/admins') { if(!protectedApi(req,res)) return; (async()=>{const [rows]=await pool.query('SELECT id,name,email,phone,role,active,created_at FROM admins ORDER BY created_at DESC');send(res,200,JSON.stringify({admins:rows}))})(); return; }
-  if (req.method === 'PATCH' && req.url.startsWith('/api/admins/')) { if(!protectedApi(req,res)) return; (async()=>{try{const id=req.url.split('/').pop(),p=await readJson(req);if(p.email){const emailError=await emailDnsError(p.email);if(emailError)return send(res,400,JSON.stringify({message:emailError}))}const passwordHash=String(p.password||'').trim()?await hashPassword(String(p.password)):null;await pool.query('UPDATE admins SET name=COALESCE(?,name),email=COALESCE(?,email),phone=COALESCE(?,phone),role=COALESCE(?,role),active=COALESCE(?,active),password_hash=COALESCE(?,password_hash) WHERE id=?',[p.name||null,p.email?normalizeEmail(p.email):null,p.phone||null,p.role||null,p.active===undefined?null:p.active,passwordHash,id]);await audit(req,'admin_updated',null,{adminId:id,passwordChanged:Boolean(passwordHash)});send(res,200,JSON.stringify({updated:true,passwordChanged:Boolean(passwordHash)}))}catch(e){send(res,400,JSON.stringify({message:e.code==='ER_DUP_ENTRY'?'Email already exists':e.message}))}})();return; }
-  if (req.method === 'DELETE' && req.url.startsWith('/api/admins/')) { if(!protectedApi(req,res)) return; (async()=>{const id=req.url.split('/').pop();await pool.query('UPDATE admins SET active=0 WHERE id=?',[id]);await audit(req,'admin_deactivated',null,{adminId:id});send(res,200,JSON.stringify({updated:true}))})();return; }
-  if (req.method === 'GET' && req.url === '/api/profile') { if(!protectedApi(req,res))return;(async()=>{const s=currentSession(req),[[row]]=await pool.query('SELECT id,name,email,phone,role,avatar_url FROM admins WHERE id=?',[s.adminId]);send(res,200,JSON.stringify(row||{}))})();return; }
-  if (req.method === 'PATCH' && req.url === '/api/profile') { if(!protectedApi(req,res))return;(async()=>{try{const s=currentSession(req),p=await readJson(req),emailError=await emailDnsError(p.email),avatar=String(p.avatarUrl||'');if(emailError)return send(res,400,JSON.stringify({message:emailError}));if(avatar.length>1500000||avatar&&!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(avatar))return send(res,400,JSON.stringify({message:'Profile image must be a PNG, JPG, WEBP, or GIF under 1.5 MB'}));await pool.query('UPDATE admins SET name=?,email=?,phone=?,avatar_url=? WHERE id=?',[p.name,normalizeEmail(p.email),p.phone,avatar||null,s.adminId]);await audit(req,'profile_updated');send(res,200,JSON.stringify({updated:true}))}catch(e){send(res,400,JSON.stringify({message:e.code==='ER_DUP_ENTRY'?'Email already exists':e.message}))}})();return; }
-  if (req.method === 'POST' && req.url === '/api/profile/password') { if(!protectedApi(req,res))return;(async()=>{try{const s=currentSession(req),p=await readJson(req),[[row]]=await pool.query('SELECT password_hash FROM admins WHERE id=?',[s.adminId]);if(!await verifyPassword(String(p.currentPassword||''),row.password_hash))return send(res,401,JSON.stringify({message:'Current password is incorrect'}));await pool.query('UPDATE admins SET password_hash=? WHERE id=?',[await hashPassword(String(p.newPassword||'')),s.adminId]);await audit(req,'password_changed');send(res,200,JSON.stringify({updated:true}))}catch(e){send(res,400,JSON.stringify({message:e.message}))}})();return; }
-  if (req.method === 'GET' && req.url === '/api/audit') { if(!protectedApi(req,res))return;(async()=>{const [rows]=await pool.query('SELECT a.id,a.action,a.vehicle,a.details,a.created_at,ad.name,ad.email FROM audit_logs a LEFT JOIN admins ad ON ad.id=a.admin_id ORDER BY a.created_at DESC LIMIT 200');send(res,200,JSON.stringify({logs:rows}))})();return; }
-  if (req.method === 'POST' && req.url === '/api/audit/event') { if(!protectedApi(req,res))return;(async()=>{try{const p=await readJson(req);await audit(req,String(p.action||'activity'),p.vehicle,p.details);send(res,201,JSON.stringify({created:true}))}catch(e){send(res,400,JSON.stringify({message:e.message}))}})();return; }
-  if (req.method === 'GET' && req.url === '/api/settings') { if(!protectedApi(req,res))return;(async()=>{const [rows]=await pool.query('SELECT setting_key,setting_value FROM app_settings');const out=Object.fromEntries(rows.map(x=>[x.setting_key,x.setting_value]));if(Object.prototype.hasOwnProperty.call(out,'smtpPassword'))out.smtpPassword='';out.smtpPasswordConfigured=Boolean((await pool.query("SELECT 1 FROM app_settings WHERE setting_key='smtpPassword' AND setting_value<>'' LIMIT 1"))[0].length);send(res,200,JSON.stringify(out))})();return; }
-  if (req.method === 'GET' && req.url === '/api/public-settings') { (async()=>{const [rows]=await pool.query("SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('businessName','logoUrl','loginSubtitle','loginLogoUrl','loginBackgroundColor','loginButtonColor','loginBackgroundGradientStart','loginBackgroundGradientEnd','loginButtonGradientStart','loginButtonGradientEnd','loginBackgroundImageUrl')");send(res,200,JSON.stringify(Object.fromEntries(rows.map(x=>[x.setting_key,x.setting_value]))))})().catch(()=>send(res,200,'{}'));return; }
-  if (req.method === 'PUT' && req.url === '/api/settings') { if(!protectedApi(req,res))return;(async()=>{const s=currentSession(req),p=await readJson(req);if(p.email&&!validEmail(p.email))return send(res,400,JSON.stringify({message:'Enter a valid business email address'}));for(const [key,value] of Object.entries(p)){if(key.endsWith('Upload'))continue;if(key==='smtpPassword'&&!String(value||'').trim())continue;await pool.query('INSERT INTO app_settings(setting_key,setting_value,updated_by) VALUES(?,?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value),updated_by=VALUES(updated_by)',[key,String(value??''),s.adminId])}await audit(req,'settings_updated',null,{keys:Object.keys(p).filter(k=>!k.endsWith('Upload'))});send(res,200,JSON.stringify({updated:true}))})();return; }
-  if (req.method === 'POST' && req.url === '/api/auth/logout') { (async()=>{const token = cookies(req).rc_session, session=sessions.get(token);if(session) await pool.query('INSERT INTO audit_logs (admin_id,action) VALUES (?,?)',[session.adminId,'logout']);if(token)sessions.delete(token);res.writeHead(200,{'Set-Cookie':'rc_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0','Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({authenticated:false}))})();return; }
-  if (req.url.startsWith('/api/') && !protectedApi(req, res)) return;
-  if (req.method === 'DELETE' && req.url.startsWith('/api/records/')) {
-    (async () => { try { const vehicle = decodeURIComponent(req.url.slice('/api/records/'.length)).trim().toUpperCase().replace(/\s+/g, ''); if (!vehicle || vehicle.length > 32) return send(res, 400, JSON.stringify({ message: 'Vehicle registration is required' })); const [result] = await pool.query('DELETE FROM vehicle_cache WHERE vehicle=?', [vehicle]); await audit(req, 'vehicle_deleted', vehicle, { deletedRows: result.affectedRows }); send(res, 200, JSON.stringify({ deleted: true, vehicle, deletedRows: result.affectedRows })); } catch (error) { send(res, 400, JSON.stringify({ message: error.message })); } })();
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/api/records') {
-    (async () => { try {
-      const [rows] = await pool.query('SELECT vehicle, provider, response_json, fetched_at FROM vehicle_cache ORDER BY fetched_at DESC');
-      const seen = new Set(); const records = [];
-      for (const row of rows) { if (seen.has(row.vehicle)) continue; seen.add(row.vehicle); const x = JSON.parse(row.response_json), d = x?.data?.result || x?.data || x; records.push({ vehicle: row.vehicle, provider: row.provider, fetched_at: row.fetched_at, status: d.rc_status || d.status || '', pucc: d.rc_pucc_upto || d.pucc_upto || null, insurance: d.rc_insurance_upto || d.insurance_upto || null, fitness: d.rc_fit_upto || d.fit_up_to || null, tax: d.rc_tax_upto || d.tax_upto || null }); }
-      send(res, 200, JSON.stringify({ records }));
-    } catch (error) { send(res, 502, JSON.stringify({ message: error.message })); } })();
-    return;
-  }
-  if (req.method === 'GET' && req.url === '/api/dashboard') {
-    (async () => { try {
-      const [[totals]] = await pool.query('SELECT COUNT(DISTINCT vehicle) AS vehicles, COUNT(*) AS records FROM vehicle_cache');
-      const [rows] = await pool.query('SELECT vehicle, provider, response_json, fetched_at FROM vehicle_cache ORDER BY fetched_at DESC');
-      const seen = new Set(); const records = [];
-      for (const row of rows) { if (seen.has(row.vehicle)) continue; seen.add(row.vehicle); const x = JSON.parse(row.response_json), d = x?.data?.result || x?.data || x; records.push({ vehicle: row.vehicle, provider: row.provider, fetched_at: row.fetched_at, status: d.rc_status || d.status || '', pucc: d.rc_pucc_upto || d.pucc_upto || null, insurance: d.rc_insurance_upto || d.insurance_upto || null, fitness: d.rc_fit_upto || d.fit_up_to || null, tax: d.rc_tax_upto || d.tax_upto || null }); }
-      const now = Date.now(), within30 = k => records.filter(r => { const t = Date.parse(r[k] || ''); return t >= now && t <= now + 30 * 86400000; }).length;
-      send(res, 200, JSON.stringify({ totals, recent: records.slice(0, 50), critical: { pucc: within30('pucc'), insurance: within30('insurance'), fitness: within30('fitness'), tax: within30('tax'), active: records.filter(r => String(r.status).toLowerCase() === 'active').length } }));
-    } catch (error) { send(res, 502, JSON.stringify({ message: error.message })); } })();
-    return;
-  }
-  if (req.method === 'POST' && req.url === '/api/rc-lookup') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
-    req.on('end', async () => {
+async function getExpiryRefreshDays() { try { const [rows] = await pool.query("SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('puccRefreshDays','insuranceRefreshDays','registrationRefreshDays')"); const values = Object.fromEntries(rows.map(row => [row.setting_key, Number(row.setting_value)])); const safe = value => Number.isFinite(value) && value >= 0 ? Math.min(value, 3650) : 7; return { pucc: safe(values.puccRefreshDays), insurance: safe(values.insuranceRefreshDays), registration: safe(values.registrationRefreshDays) }; } catch { return { pucc: 7, insurance: 7, registration: 7 }; } }
+async function getResponseMessageOverrides() { try { const [[row]] = await pool.query("SELECT setting_value FROM app_settings WHERE setting_key='responseMessageOverrides' LIMIT 1"); const parsed = JSON.parse(row?.setting_value || '{}'); return parsed && typeof parsed === 'object' ? parsed : {}; } catch { return {}; } }
+function applyMessageOverride(payload, overrides) { try { const parsed = JSON.parse(payload), code = parsed.message_code; const defaults = { OK: 'Vehicle details are ready.', INVALID_INPUT: 'Please check the vehicle registration number and try again.', REQUEST_FAILED: 'We could not complete this request right now. Please try again shortly.', PROVIDER_UNAVAILABLE: 'Vehicle information is temporarily unavailable. Please try again shortly.', INTERNAL_ERROR: 'We could not complete this request right now. Please try again shortly.', VERIFICATION_FAILED: 'Vehicle verification could not be completed.', NO_RECORD_FOUND: 'No vehicle record was found for this registration.', SOURCE_UNAVAILABLE: 'Vehicle information is temporarily unavailable. Please try again later.', LOOKUP_QUEUED: 'Your request is being processed. Please try again shortly.', QUEUE_FULL: 'Too many requests are being processed. Please try again shortly.', INVALID_API_KEY: 'The supplied access key is not valid.', MISSING_API_KEY: 'An access key is required.', RATE_LIMITED: 'Request limit reached. Please try again later.' }; if (code) parsed.message = typeof overrides[code] === 'string' && overrides[code].trim() ? overrides[code].trim() : (defaults[code] || 'We could not complete this request right now. Please try again shortly.'); return JSON.stringify(parsed); } catch { return payload; } }
+function providerRetryable(payload, status) {
+  // Way2API documents charge state separately from HTTP status. Never retry a
+  // charged response, even if it uses HTTP 500/503. Retry only transient,
+  // explicitly non-charged provider failures.
+  return payload?.charged === false && (['REQUEST_FAILED','PROVIDER_UNAVAILABLE','INTERNAL_ERROR'].includes(payload?.message_code) || [500,503].includes(Number(status)));
+}
+function queueError(code, message, status=503) { const error = new Error(message); error.code = code; error.status = status; return error; }
+const providerWorker = createProviderWorker({ pool, queueError, providerRetryable, fetchImpl: nativeFetch, providerBaseUrl: process.env.WAY2API_BASE_URL || 'https://app.way2api.com/api/v1', providerApiKey: process.env.WAY2API_API_KEY });
+const vehicleRepository = createVehicleRepository(pool);
+const usageRepository = createUsageRepository(pool);
+const vehicleController = createVehicleController({ repository: vehicleRepository, send, audit });
+const authController = createAuthController({ pool, readJson, normalizeEmail, validEmail, verifyPassword, createSessionCookie: session => sessionCookie(session), sessionTtl, currentSession, audit, send });
+const adminController = createAdminController({ pool, readJson, emailDnsError, validPhone, hashPassword, normalizeEmail, audit, send });
+const planController = createPlanController({ pool, readJson, send });
+const profileController = createProfileController({ pool, readJson, currentSession, validEmail, hashPassword, verifyPassword, audit, send });
+const settingsController = createSettingsController({ pool, readJson, currentSession, validEmail, audit, send });
+const apiKeyController = createApiKeyController({ pool, readJson, hashApiKey, currentSession, audit, send });
+const usageController = createUsageController({ pool, send });
+const auditController = createAuditController({ pool, readJson, audit, send });
+const usageDetailController = createUsageDetailController({ pool, repository: usageRepository, send, exportUsage: require('./usage-export') });
+const setupController = createSetupController({ pool, readJson, emailDnsError, validPhone, hashPassword, normalizeEmail, send });
+const lookupController = createLookupController({ pool, readJson, validRegistration, cacheTtlMs: CACHE_TTL_MS, refreshCooldownMs: REFRESH_COOLDOWN_MS, getExpiryRefreshDays, getResponseMessageOverrides, applyMessageOverride, audit, send, fetchImpl: nativeFetch });
+const callWay2Api = providerWorker.call;
+const persistProviderResult = providerWorker.persist;
+const runProviderJob = providerWorker.run;
+async function initExternalQueue() {
+  if (!queueEnabled || !redisUrl) { console.warn('External queue: Redis is not configured; using bounded local single-flight fallback'); return; }
+  redisConnection = new IORedis(redisUrl, { maxRetriesPerRequest: null, enableReadyCheck: true, lazyConnect: true, retryStrategy: () => null });
+  try { await redisConnection.connect(); } catch (error) { console.warn(`External queue: Redis unavailable (${error.code || error.message}); using bounded local single-flight fallback`); redisConnection.disconnect(); redisConnection = null; return; }
+  redisConnection.on('error', error => console.error('External queue Redis error:', error.message));
+  const connection = { connection: redisConnection };
+  externalQueue = new Queue('external-rc-lookups', connection);
+  externalQueueEvents = new QueueEvents('external-rc-lookups', connection);
+  externalWorker = new Worker('external-rc-lookups', async job => {
+    const started = Date.now();
+    for (let attempt = 0; attempt <= 2; attempt++) {
       try {
-        const payload = JSON.parse(body || '{}');
-        const vehicle = String(payload.vehiclenumber || '').toUpperCase().replace(/\s+/g, '');
-        if (!validRegistration(vehicle)) return send(res, 400, JSON.stringify({ success:false, message:'Invalid registration number. Use the four-digit final series, for example UP16AN0593.' }));
-        const provider = payload.provider === 'lorryinfo' ? 'lorryinfo' : 'way2api';
-        const [rows] = await pool.query('SELECT * FROM vehicle_cache WHERE vehicle = ? ORDER BY fetched_at DESC LIMIT 1', [vehicle]);
-        const entry = rows[0]; const now = Date.now();
-        if (!payload.forceRefresh && entry && now - Number(entry.fetched_at) < CACHE_TTL_MS) { await audit(req,'vehicle_searched',vehicle,{source:'mysql',provider:entry.provider}); return send(res, 200, JSON.stringify({ ...JSON.parse(entry.response_json), _cache: { source: 'mysql', provider: entry.provider, fetchedAt: new Date(Number(entry.fetched_at)).toISOString() } })); }
-        if (payload.forceRefresh && entry && now - Number(entry.last_refresh_at) < REFRESH_COOLDOWN_MS) return send(res, 429, JSON.stringify({ message: 'Refresh is limited to once every 7 days for this vehicle.' }));
-        const isWay2Api = provider === 'way2api';
-        const apiKey = isWay2Api ? process.env.WAY2API_API_KEY : process.env.LORRYINFO_API_KEY;
-        if (!apiKey) return send(res, 500, JSON.stringify({ message: `Missing ${isWay2Api ? 'WAY2API_API_KEY' : 'LORRYINFO_API_KEY'} in .env` }));
-        const url = isWay2Api ? `${process.env.WAY2API_BASE_URL || 'https://app.way2api.com/api/v1'}/rc/verify` : 'https://api.lorryinfo.com/api/v1/RCbyNumber_1';
-        const headers = isWay2Api ? { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` } : { 'Content-Type': 'application/json', 'x-api-key': apiKey };
-        const requestBody = isWay2Api ? { rc_number: vehicle } : { vehiclenumber: vehicle };
-        const upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(requestBody) });
-        const responseText = await upstream.text();
-        if (upstream.ok) { await pool.query('INSERT INTO vehicle_cache (vehicle, provider, response_json, fetched_at, last_refresh_at) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE response_json=VALUES(response_json), fetched_at=VALUES(fetched_at), last_refresh_at=VALUES(last_refresh_at)', [vehicle, provider, responseText, now, now]); await audit(req,payload.forceRefresh?'vehicle_refreshed':'vehicle_saved',vehicle,{provider,source:'api'}); }
-        send(res, upstream.status, responseText, upstream.headers.get('content-type') || 'application/json; charset=utf-8');
-      } catch (error) { send(res, 502, JSON.stringify({ message: error.message })); }
+        const result = await runProviderJob(job.data);
+        return { status: result.status, text: result.text, attempt: attempt + 1 };
+      } catch (error) {
+        if (error.code !== 'WAY2API_TRANSIENT' || attempt === 2 || Date.now() - started > queueDeadlineMs) throw error;
+        await new Promise(resolve => setTimeout(resolve, Math.min(8000, 1000 * (2 ** attempt) + Math.floor(Math.random() * 500))));
+      }
+    }
+  }, { ...connection, concurrency: 1, limiter: { max: 5, duration: 60000 } });
+  externalWorker.on('failed', (job, error) => console.error('External queue job failed:', job?.id, error.code || error.message));
+  console.log('External queue: Redis/BullMQ worker enabled');
+}
+async function queueProviderLookup(vehicle) {
+  const key = `way2api:${vehicle}`;
+  if (localFlights.has(key)) return { promise: localFlights.get(key), joined: true };
+  if (externalQueue) {
+    const lockKey = `vdesk:singleflight:${key}`;
+    const lockToken = crypto.randomUUID();
+    let lockAcquired;
+    try { lockAcquired = await redisConnection.set(lockKey, lockToken, 'NX', 'EX', Math.max(10, Math.ceil(queueDeadlineMs / 1000))); }
+    catch (error) { throw queueError('QUEUE_UNAVAILABLE', `Redis single-flight lock unavailable: ${error.message}`, 503); }
+    if (!lockAcquired) {
+      const waitForExisting = (async () => {
+        const deadline = Date.now() + queueWaitMs;
+        while (Date.now() < deadline) {
+          const [rows] = await pool.query('SELECT response_json FROM vehicle_cache WHERE vehicle=? ORDER BY fetched_at DESC LIMIT 1', [vehicle]);
+          if (rows[0]) return { status: 200, text: rows[0].response_json, fromCache: true };
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        throw queueError('LOOKUP_QUEUED', 'Lookup is still processing', 202);
+      })();
+      return { promise: waitForExisting, joined: true };
+    }
+    const counts = await externalQueue.getJobCounts('waiting','active','delayed');
+    if (Number(counts.waiting || 0) >= queueMaxWaiting) {
+      await redisConnection.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end", 1, lockKey, lockToken);
+      throw queueError('QUEUE_FULL', 'Lookup queue is temporarily full', 503);
+    }
+    const job = await externalQueue.add('rc-lookup', { vehicle, jobId: crypto.randomUUID() }, { jobId: crypto.randomUUID(), removeOnComplete: 100, removeOnFail: 100, attempts: 1 });
+    const resultPromise = job.waitUntilFinished(externalQueueEvents, queueDeadlineMs).finally(async () => {
+      externalQueueEvents.removeAllListeners(`completed:${job.id}`);
+      try { await redisConnection.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end", 1, lockKey, lockToken); } catch (error) { console.error('Redis single-flight unlock failed:', error.message); }
     });
-    return;
+    return { promise: resultPromise, joined: false, jobId: job.id };
   }
+  if (localFlights.size >= 100) throw queueError('QUEUE_FULL', 'Lookup queue is temporarily full', 503);
+  const promise = (async () => { for (let attempt = 0; attempt <= 2; attempt++) { try { return await runProviderJob({vehicle, jobId:crypto.randomUUID()}); } catch (error) { if (error.code !== 'WAY2API_TRANSIENT' || attempt === 2) throw error; await new Promise(resolve => setTimeout(resolve, Math.min(8000, 1000 * (2 ** attempt) + Math.floor(Math.random() * 500)))); } } })();
+  localFlights.set(key, promise); promise.finally(() => localFlights.delete(key)).catch(() => {});
+  return { promise, joined: false };
+}
+function queueResponse(status, body) { return { status, body: JSON.stringify(body) }; }
+const externalLookupController = createExternalLookupController({ externalKey, validRegistration, pool, cacheTtlMs: CACHE_TTL_MS, queueProviderLookup, queueWaitMs, queueError, finalizeUsage, auditExternal, addExternalUsage, getExpiryRefreshDays, getResponseMessageOverrides, applyMessageOverride, send });
+const server = http.createServer((req, res) => {
+  if (shuttingDown) return jsonError(res, 503, 'Server is shutting down', 'SERVER_SHUTTING_DOWN');
+  applyRequestTimeout(req, res, requestTimeoutMs, () => jsonError(res, 408, 'Request timed out', 'REQUEST_TIMEOUT'));
+  const externalVehiclePath=req.url.match(/^\/api\/(?:v1\/)?external\/rc\/([^?]+)/);
+  if(req.method==='GET'&&externalVehiclePath){const candidate=decodeURIComponent(externalVehiclePath[1]).toUpperCase().replace(/\s+/g,'');if(!validRegistration(candidate))return getResponseMessageOverrides().then(overrides=>send(res,400,applyMessageOverride(JSON.stringify({success:false,message:'Invalid registration number. Use the four-digit final series, for example UP16AN0593.',message_code:'INVALID_INPUT',charged:false}),overrides))).catch(()=>send(res,400,JSON.stringify({success:false,message:'Please check the vehicle registration number and try again.',message_code:'INVALID_INPUT',charged:false})))}
+  if (req.method === 'GET' && (req.url.startsWith('/api/external/rc/') || req.url.startsWith('/api/v1/external/rc/'))) { externalLookupController.lookup(req, res); return; }
+  // Controller dispatch is kept ahead of the legacy blocks below during the final cleanup.
+  if (req.method === 'GET' && req.url === '/api/auth/me') { authController.session(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/auth/login') { authController.login(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/auth/logout') { authController.logout(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/admins') { if (!protectedApi(req, res)) return; adminController.create(req, res); return; }
+  if (req.method === 'GET' && req.url === '/api/admins') { if (!protectedApi(req, res)) return; adminController.list(req, res); return; }
+  if (req.method === 'PATCH' && req.url.startsWith('/api/admins/')) { if (!protectedApi(req, res)) return; adminController.update(req, res, req.url.split('/').pop()); return; }
+  if (req.method === 'DELETE' && req.url.startsWith('/api/admins/')) { if (!protectedApi(req, res)) return; adminController.deactivate(req, res, req.url.split('/').pop()); return; }
+  if (req.method === 'GET' && req.url === '/api/plans') { if (!protectedApi(req, res)) return; planController.listPlans(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/plans') { if (!protectedApi(req, res)) return; planController.createPlan(req, res); return; }
+  if (req.method === 'PATCH' && req.url.startsWith('/api/plans/')) { if (!protectedApi(req, res)) return; planController.updatePlan(req, res, Number(req.url.split('/').pop())); return; }
+  if (req.method === 'GET' && req.url === '/api/topup-packages') { if (!protectedApi(req, res)) return; planController.listPackages(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/topup-packages') { if (!protectedApi(req, res)) return; planController.createPackage(req, res); return; }
+  if (req.method === 'PATCH' && req.url.match(/^\/api\/topup-packages\/\d+$/)) { if (!protectedApi(req, res)) return; planController.updatePackage(req, res, Number(req.url.split('/').pop())); return; }
+  if (req.method === 'DELETE' && req.url.match(/^\/api\/topup-packages\/\d+$/)) { if (!protectedApi(req, res)) return; planController.deactivatePackage(req, res, Number(req.url.split('/').pop())); return; }
+  if (req.method === 'GET' && req.url === '/api/profile') { if (!protectedApi(req, res)) return; profileController.get(req, res); return; }
+  if (req.method === 'PATCH' && req.url === '/api/profile') { if (!protectedApi(req, res)) return; profileController.update(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/profile/password') { if (!protectedApi(req, res)) return; profileController.changePassword(req, res); return; }
+  if (req.method === 'GET' && req.url === '/api/settings') { if (!protectedApi(req, res)) return; settingsController.get(req, res); return; }
+  if (req.method === 'PUT' && req.url === '/api/settings') { if (!protectedApi(req, res)) return; settingsController.update(req, res); return; }
+  if (req.method === 'GET' && req.url === '/api/public-settings') { settingsController.publicGet(req, res).catch(() => send(res, 200, '{}')); return; }
+  if (req.method === 'GET' && req.url === '/api/external-keys') { if (!protectedApi(req, res)) return; apiKeyController.list(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/external-keys') { if (!protectedApi(req, res)) return; apiKeyController.create(req, res); return; }
+  if (req.method === 'PATCH' && req.url.startsWith('/api/external-keys/')) { if (!protectedApi(req, res)) return; apiKeyController.update(req, res, req.url.split('/').pop()); return; }
+  if (req.method === 'DELETE' && req.url.startsWith('/api/external-keys/')) { if (!protectedApi(req, res)) return; apiKeyController.deactivate(req, res, req.url.split('/').pop()); return; }
+  if (req.method === 'POST' && req.url.match(/^\/api\/external-keys\/\d+\/regenerate$/)) { if (!protectedApi(req, res)) return; apiKeyController.regenerate(req, res, req.url.split('/')[3]); return; }
+  if (req.method === 'POST' && req.url.match(/^\/api\/external-keys\/\d+\/plan$/)) { if (!protectedApi(req, res)) return; apiKeyController.assignPlan(req, res, req.url.split('/')[3]); return; }
+  if (req.method === 'GET' && req.url === '/api/usage') { if (!protectedApi(req, res)) return; usageController.summary(req, res); return; }
+  if (req.method === 'GET' && req.url === '/api/usage/today') { if (!protectedApi(req, res)) return; usageController.today(req, res); return; }
+  if (req.method === 'GET' && req.url === '/api/audit') { if (!protectedApi(req, res)) return; auditController.list(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/audit/event') { if (!protectedApi(req, res)) return; auditController.create(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/auth/setup') { setupController.create(req, res); return; }
+  if (req.method === 'POST' && req.url.match(/^\/api\/external-keys\/\d+\/topup$/)) { if (!protectedApi(req, res)) return; apiKeyController.creditTopup(req, res, req.url.split('/')[3]); return; }
+  if (req.method === 'GET' && /^\/api\/(?:v1\/)?external\/usage(?:\?|$)/.test(req.url)) { usageController.externalSummary(req, res, externalKeyIdentity); return; }
+  const usageDetailPath = req.url.match(/^\/api\/usage\/keys\/(\d+)(?:\/export\.(pdf|xlsx))?$/);
+  if (req.method === 'GET' && usageDetailPath) { if (!protectedApi(req, res)) return; usageDetailController.get(req, res, Number(usageDetailPath[1]), usageDetailPath[2]); return; }
+  if (req.method === 'DELETE' && req.url.startsWith('/api/records/')) { if (!protectedApi(req, res)) return; const vehicle = decodeURIComponent(req.url.slice('/api/records/'.length)).trim().toUpperCase().replace(/\s+/g, ''); if (!vehicle || vehicle.length > 32) return send(res, 400, JSON.stringify({ message: 'Vehicle registration is required' })); vehicleController.remove(req, res, vehicle); return; }
+  if (req.method === 'GET' && req.url === '/api/records') { if (!protectedApi(req, res)) return; vehicleController.list(req, res); return; }
+  if (req.method === 'GET' && req.url === '/api/dashboard') { if (!protectedApi(req, res)) return; vehicleController.dashboard(req, res); return; }
+  if (req.method === 'POST' && req.url === '/api/rc-lookup') { if (!protectedApi(req, res)) return; lookupController.lookup(req, res); return; }
   const keyPath = req.url.match(/^\/key=(\d+)\/?(?:\?.*)?$/); if (req.method === 'GET' && keyPath) { res.writeHead(302, { Location: `/plan/${keyPath[1]}` }); res.end(); return; }
   const cleanPath = req.url.split('?')[0];
   const isPage = !path.extname(cleanPath) || cleanPath.endsWith('.html');
@@ -246,7 +327,7 @@ const server = http.createServer((req, res) => {
   if(req.method==='GET' && (cleanPath==='/login'||cleanPath==='/login.html')) {
     if(authenticated(req)){
       const requested=new URL(req.url,'http://localhost').searchParams.get('returnTo')||'/dashboard';
-      const safe=/^\/(?:dashboard|search|records|pucc|insurance|fitness|activity|api-docs|api-keys|admins|audit|settings|plans|usage|plan\/\d+)\/?(?:\?[^#]*)?$/.test(requested)?requested:'/dashboard';
+      const safe=/^\/(?:dashboard|search|records|pucc|insurance|fitness|activity|api-docs|user-guide|api-keys|admins|audit|settings|plans|usage|plan\/\d+)\/?(?:\?[^#]*)?$/.test(requested)?requested:'/dashboard';
       res.writeHead(302,{'Location':safe,'Cache-Control':'no-store'});return res.end();
     }
     res.setHeader('Cache-Control','no-store');return send(res,200,fs.readFileSync(path.join(root,'login.html'),'utf8'),'text/html; charset=utf-8');
@@ -258,7 +339,33 @@ const server = http.createServer((req, res) => {
   const requested = /^\/plan\/\d+\/?$/.test(cleanPath) ? '/key-details.html' : cleanPath === '/' || !path.extname(cleanPath) ? '/index.html' : cleanPath;
   const file = path.join(root, requested.replace(/^\//, ''));
   if (!file.startsWith(root) || !fs.existsSync(file)) return send(res, 404, 'Not found', 'text/plain; charset=utf-8');
-  res.writeHead(200, { 'Content-Type': mime[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store, no-cache, must-revalidate' }); fs.createReadStream(file).pipe(res);
+  const ext = path.extname(file), isStaticAsset = ['.js','.css'].includes(ext);
+  res.writeHead(200, { 'Content-Type': mime[ext] || 'application/octet-stream', 'Cache-Control': isStaticAsset ? 'public, max-age=300' : 'no-store, no-cache, must-revalidate' }); fs.createReadStream(file).pipe(res);
 });
 
-initDatabase().then(() => server.listen(port, () => console.log(`RC Lookup running at http://localhost:${port}`))).catch(error => { console.error('MySQL connection failed:', error.message); process.exit(1); });
+server.keepAliveTimeout = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 5000);
+server.headersTimeout = Number(process.env.HEADERS_TIMEOUT_MS || 10000);
+
+function registerOperationalRoutes() {
+  const previous = server.listeners('request')[0];
+  server.removeListener('request', previous);
+  const systemRoute = createSystemRoutes({ send, jsonError, healthCheck: () => healthCheck(pool) });
+  server.on('request', (req, res) => {
+    if (systemRoute(req, res)) return;
+    return previous.call(server, req, res);
+  });
+}
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal}: graceful shutdown started`);
+  await new Promise(resolve => server.close(resolve));
+  try { await externalWorker?.close(); await externalQueueEvents?.close(); await externalQueue?.close(); await redisConnection?.quit(); } catch (error) { console.error('Queue shutdown failed:', error.message); }
+  await pool.end();
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+registerOperationalRoutes();
+initDatabase().then(() => initExternalQueue()).then(() => server.listen(port, () => console.log(`RC Lookup running at http://localhost:${port}`))).catch(error => { console.error('MySQL connection failed:', error.message); process.exit(1); });

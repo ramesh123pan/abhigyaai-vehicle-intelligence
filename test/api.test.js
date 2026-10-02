@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+
+if (fs.existsSync('.env.test')) process.loadEnvFile('.env.test');
 
 const baseUrl = (process.env.TEST_BASE_URL || 'http://127.0.0.1:4173').replace(/\/$/, '');
 const email = process.env.TEST_ADMIN_EMAIL;

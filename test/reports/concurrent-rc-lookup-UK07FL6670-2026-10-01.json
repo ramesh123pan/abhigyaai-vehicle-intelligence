@@ -1,0 +1,15 @@
+{
+  "test": "five concurrent external RC lookups",
+  "date": "2026-10-01",
+  "registration": "UK07FL6670",
+  "precondition": { "vehicle_cache_rows": 0, "usage_rows": 0, "redis_enabled": true, "server_port": 4174 },
+  "http_results": { "request_count": 5, "http_200": 5, "json_valid": 5, "success": 5, "message_code": "OK", "vehicle_status": "ACTIVE", "provider_order_id": "W2A179084269661264QE", "elapsed_ms": [1951, 1943, 1997, 1946, 1948] },
+  "database_usage_audit": { "total_rows": 5, "way2api_live_rows": 1, "mysql_cache_rows": 4, "cache_hit_rows": 4, "non_cache_rows": 1, "rows": [
+    { "id": 68, "source": "mysql", "status_code": 200, "cache_hit": 1 },
+    { "id": 69, "source": "way2api", "status_code": 200, "cache_hit": 0 },
+    { "id": 70, "source": "mysql", "status_code": 200, "cache_hit": 1 },
+    { "id": 71, "source": "mysql", "status_code": 200, "cache_hit": 1 },
+    { "id": 72, "source": "mysql", "status_code": 200, "cache_hit": 1 }
+  ] },
+  "conclusion": "Five simultaneous users produced exactly one live Way2API usage row and four MySQL cache/joined rows."
+}

@@ -1,4 +1,5 @@
 .env
+.env.test
 vehicle-cache.sqlite
 vehicle-cache.sqlite-shm
 vehicle-cache.sqlite-wal
